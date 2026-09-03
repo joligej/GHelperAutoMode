@@ -98,9 +98,9 @@ function Test-ReleasePreflight {
     $t = $config.Thresholds
 
     Assert-True ($config.SchemaVersion -eq 7) 'config.example.json must use schema 7.'
-    Assert-True ($projectVersion -eq '4.4.1') "project version is '$projectVersion', expected 4.4.1."
-    Assert-True ([string]$propertyGroup.AssemblyVersion -eq '4.4.1.0') 'AssemblyVersion must be 4.4.1.0.'
-    Assert-True ([string]$propertyGroup.FileVersion -eq '4.4.1.0') 'FileVersion must be 4.4.1.0.'
+    Assert-True ($projectVersion -eq '4.4.2') "project version is '$projectVersion', expected 4.4.2."
+    Assert-True ([string]$propertyGroup.AssemblyVersion -eq '4.4.2.0') 'AssemblyVersion must be 4.4.2.0.'
+    Assert-True ([string]$propertyGroup.FileVersion -eq '4.4.2.0') 'FileVersion must be 4.4.2.0.'
     Assert-True ($config.PollIntervalMilliseconds -ge 500) 'poll interval is below the supported floor.'
     Assert-True ([string]$config.KeyboardLighting.Mode -eq 'Unmanaged') 'example lighting mode must be opt-in (Unmanaged).'
     Assert-True ($config.KeyboardLighting.AccentPollIntervalSeconds -ge 2) 'accent poll interval is below the supported floor.'

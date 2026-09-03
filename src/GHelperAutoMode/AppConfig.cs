@@ -187,7 +187,7 @@ internal sealed class ConfigService
             {
                 BackupPreMigrationConfig(json);
                 Save();
-                LastLoadWarning = "GHelperAutoMode upgraded its configuration to schema 7. Keyboard lighting remains unmanaged until you explicitly select a mode. The previous config was backed up in the same folder.";
+                LastLoadWarning = "Your config was updated to schema 7. AutoMode will leave keyboard lighting alone until you choose a mode. A backup of the previous config is in the same folder.";
             }
 
             return Current;
@@ -200,7 +200,7 @@ internal sealed class ConfigService
 
             try { File.Copy(ConfigPath, backup, overwrite: true); } catch { /* best effort */ }
 
-            LastLoadWarning = $"config.json was invalid and defaults were restored. Backup: {backup}. Error: {ex.Message}";
+            LastLoadWarning = $"config.json could not be read, so defaults were restored. Backup: {backup}. Error: {ex.Message}";
             Current = new AutoModeConfig();
             Normalize(Current);
             Save();

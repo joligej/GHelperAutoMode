@@ -109,7 +109,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         _started = true;
         UpdateTimerInterval();
         _timer.Start();
-        _ = ApplyNowAsync("startup reconciliation");
+        _ = ApplyNowAsync("startup check");
     }
 
     public void ReloadConfig()
@@ -132,7 +132,7 @@ internal sealed class KeyboardLightingManager : IDisposable
             if (forceGHelperReload)
                 _gHelperReloadPending = true;
 
-            return new KeyboardLightingApplyResult(false, false, "Another keyboard-lighting update is already in progress.");
+            return new KeyboardLightingApplyResult(false, false, "A keyboard-lighting update is already in progress.");
         }
 
         _applyInProgress = true;
@@ -147,7 +147,7 @@ internal sealed class KeyboardLightingManager : IDisposable
 
             if (!result.Success)
                 _logger.Warn($"Keyboard lighting ({reason}): {result.Message}");
-            else if (result.Changed || reason != "periodic reconciliation")
+            else if (result.Changed || reason != "regular check")
                 _logger.Info($"Keyboard lighting ({reason}): {result.Message}");
 
             return result;
@@ -174,7 +174,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 _ownershipRefreshPending = false;
                 _gHelperReloadPending = false;
                 _ = ApplyNowAsync(
-                    "queued ownership reassertion",
+                    "queued ownership check",
                     forceGHelperReload: reloadGHelper,
                     forceOwnershipRefresh: refreshOwnership);
             }
@@ -216,7 +216,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         if (_configService.Current.KeyboardLighting.Mode == KeyboardLightingMode.Unmanaged)
             return;
 
-        await ApplyNowAsync("periodic reconciliation");
+        await ApplyNowAsync("regular check");
     }
 
     public void QueueOwnershipReassertion(string reason)
@@ -259,7 +259,7 @@ internal sealed class KeyboardLightingManager : IDisposable
             return new KeyboardLightingApplyResult(
                 true,
                 false,
-                "Unmanaged: existing Windows and G-Helper lighting settings are left unchanged.");
+                "Lighting left alone. Windows and G-Helper settings were not changed.");
         }
 
         var beforeAura = TryReadGHelperLighting();
@@ -273,7 +273,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         if (mode == KeyboardLightingMode.GHelperWindowsAccent)
         {
             if (!TryGetWindowsAccentArgb(out var accentArgb))
-                return new KeyboardLightingApplyResult(false, false, "Windows did not provide a usable accent color.");
+                return new KeyboardLightingApplyResult(false, false, "Windows did not return an accent color that G-Helper can use.");
 
             auraMode = GHelperStaticAuraMode;
             auraColor = unchecked((int)accentArgb);
@@ -336,12 +336,12 @@ internal sealed class KeyboardLightingManager : IDisposable
             TryGetWindowsAccentArgb(out var currentAccent) ? currentAccent : null);
         var changed = registryResult.Changed || gHelperResult.Changed;
         var owner = windowsOwns
-            ? $"Windows owns lighting; foreground app takeover is blocked; "
+            ? $"Windows controls the lighting; app takeover is off; "
               + $"{state.WindowsOwnedDeviceCount}/{state.DeviceCount} device(s) aligned; "
               + $"effective color {FormatNullableArgb(state.EffectiveColorArgb)} ({state.EffectiveColorSource})"
             : mode == KeyboardLightingMode.GHelperWindowsAccent
-                ? $"G-Helper owns lighting and uses Windows accent {FormatArgb(unchecked((uint)auraColor!.Value))}"
-                : "G-Helper owns lighting and uses its existing manual Aura settings";
+                ? $"G-Helper controls the lighting with Windows accent {FormatArgb(unchecked((uint)auraColor!.Value))}"
+                : "G-Helper controls the lighting and keeps its current Aura settings";
         var suffix = gHelperResult.Message.Length == 0 ? string.Empty : $" {gHelperResult.Message}";
 
         return new KeyboardLightingApplyResult(
@@ -415,7 +415,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         return new KeyboardLightingApplyResult(
             true,
             wroteConfig || forceReload,
-            "G-Helper was reloaded through its normal startup route.");
+            "G-Helper restarted so the new lighting setting can take effect.");
     }
 
     private static bool ApplyDesiredGHelperValues(

@@ -1,12 +1,12 @@
 # Architecture
 
-This document defines the behavioral invariants of GHelperAutoMode. Configuration values are documented in `examples/config.example.json`.
+This note explains the rules the code is expected to keep. It is meant for anyone reviewing or changing GHelperAutoMode. The actual configuration values live in `examples/config.example.json`.
 
 ## Components
 
 - `AutomationEngine` samples telemetry, maintains evidence timers, evaluates application rules, and selects a target performance profile.
 - `GHelperController` sends and confirms profile requests through G-Helper.
-- `KeyboardLightingManager` reconciles the selected lighting owner independently from performance-profile decisions.
+- `KeyboardLightingManager` keeps the selected lighting owner in place, separately from performance-profile decisions.
 - `StartupManager` owns the per-user Task Scheduler entry and legacy-startup migration.
 - `PowerNotificationWindow` receives display, resume, and session notifications.
 
@@ -49,10 +49,10 @@ Resume, configuration reload, and explicit control-state changes increment an en
 
 Normal hardware transitions are serialized. A stronger promotion may preempt a pending lower-profile downshift:
 
-- pending Silent while new Balanced or Turbo evidence exists: reassert Balanced
-- pending Balanced while new Turbo evidence exists: reassert Turbo
+- pending Silent while new Balanced or Turbo evidence exists: send Balanced again
+- pending Balanced while new Turbo evidence exists: send Turbo again
 
-An explicit tray action has higher priority than an automatic request. AutoMode may reassert the selected forced profile once so the user's command is the latest command sent to G-Helper. Older in-flight commands remain in recent-command history so delayed G-Helper writes are not misclassified as external changes.
+An explicit tray action has higher priority than an automatic request. AutoMode may send the selected forced profile once more so the user's choice is the latest command sent to G-Helper. Older in-flight commands stay in recent-command history, which prevents a delayed G-Helper write from being mistaken for an outside change.
 
 ### Confirmation and retries
 
@@ -107,7 +107,7 @@ Lighting management is independent from the performance state machine and never 
 
 The order matters: G-Helper releases direct control before Windows reacquires the device. Existing Windows effect and color settings are preserved.
 
-The installed G-Helper revision applies Aura after logon, unlock, and console connection without consulting `skip_aura`. AutoMode therefore queues a delayed, coalesced release-and-reacquire operation for those events and for resume. Changes to G-Helper's Aura mode, colors, speed, or skip flag are detected during reconciliation.
+The installed G-Helper revision applies Aura after logon, unlock, and console connection without consulting `skip_aura`. AutoMode therefore waits briefly, asks G-Helper to release the device, and gives it back to Windows after those events and after resume. Repeated events are folded into one update. Changes to G-Helper's Aura mode, colors, speed, or skip flag are picked up during the next check.
 
 ### G-Helper-owned modes
 
@@ -115,7 +115,7 @@ Windows Dynamic Lighting is disabled before G-Helper is reloaded. Accent mode wr
 
 ### Concurrency
 
-Only one lighting reconciliation runs at a time. A session or ownership request that arrives during an active operation is queued. Unchanged periodic checks do not restart G-Helper or produce log entries.
+Only one lighting update runs at a time. A new session or ownership request waits for the active update to finish. A regular check that finds no change does not restart G-Helper or write to the log.
 
 ## Startup integrity
 

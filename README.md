@@ -1,8 +1,30 @@
 # GHelperAutoMode
 
-GHelperAutoMode is a Windows tray companion for [G-Helper](https://github.com/seerge/g-helper). It selects the Silent, Balanced, or Turbo performance profile from system load, temperature, foreground activity, display state, and optional application rules. It can also assign keyboard-lighting control to either Windows Dynamic Lighting or G-Helper.
+GHelperAutoMode sits in the Windows tray and watches what your laptop is doing. It asks [G-Helper](https://github.com/seerge/g-helper) for Silent, Balanced, or Turbo when the measured load and temperatures call for it. It can also keep Windows Dynamic Lighting and G-Helper from fighting over the keyboard backlight.
 
-The application does not replace G-Helper. G-Helper continues to apply hardware profiles; AutoMode only decides which profile to request and, when enabled, which lighting system owns the keyboard.
+G-Helper still does the hardware work. AutoMode adds the automatic decisions and, if you enable lighting management, makes sure one lighting system is in charge at a time.
+
+## Replacing Armoury Crate
+
+AutoMode is not a stand-alone replacement for Armoury Crate. [G-Helper is the Armoury Crate alternative](https://github.com/seerge/g-helper); AutoMode is an optional layer on top. Together, they are meant to replace the laptop-control part of Armoury Crate on supported ASUS laptops.
+
+Why use this setup:
+
+- **It stays focused.** G-Helper handles laptop controls, while AutoMode handles automatic profile switching and keyboard-lighting ownership. AutoMode has no account, store, news feed, game library, or cloud service.
+- **Profiles follow the workload.** Armoury Crate can link settings to an application through Scenario Profiles. AutoMode can use application rules too, but it can also react to sustained CPU load, GPU load, temperature, and foreground activity.
+- **Small spikes do not cause constant switching.** Timers, hysteresis, cooldowns, and fresh-telemetry checks keep profile changes deliberate.
+- **A dark screen stays off.** When Windows does not confirm that the display is on, AutoMode avoids normal keyboard-input APIs and uses a non-waking G-Helper route instead.
+- **Lighting control is explicit.** You choose Windows, G-Helper with the Windows accent color, G-Helper's existing Aura settings, or no management at all.
+- **The setup is easy to inspect.** AutoMode uses a readable JSON config, has public source, and can be built with one PowerShell command.
+
+There are trade-offs. [ASUS describes Armoury Crate](https://www.asus.com/support/faq/1041654/) as a broader device suite: it also covers supported peripherals, Aura Sync and Aura Creator, driver and utility downloads, account features, and other device-specific pages. G-Helper and AutoMode do not promise a one-for-one replacement for all of that. Check your model and any ASUS peripherals you depend on before removing Armoury Crate.
+
+[G-Helper recommends against running its controls alongside Armoury Crate services](https://github.com/seerge/g-helper/wiki/Requirements), because both can change the same settings. A sensible switch looks like this:
+
+1. Set up G-Helper first and check performance modes, GPU mode, battery limits, hotkeys, and any model-specific controls you need.
+2. Run AutoMode and test Silent, Balanced, Turbo, startup, sleep/resume, and your chosen lighting mode.
+3. If everything works, remove Armoury Crate with the [official ASUS uninstall tool](https://www.asus.com/support/faq/1041654/) and restart Windows.
+4. Keep the ASUS System Control Interface installed; G-Helper relies on it. Armoury Crate can be installed again later if your model needs a feature that is not covered.
 
 ## Requirements
 
@@ -14,11 +36,11 @@ The application does not replace G-Helper. G-Helper continues to apply hardware 
 
 The self-contained release includes the .NET runtime.
 
-## Main features
+## What AutoMode adds
 
 - Three-level automatic profile selection: Silent, Balanced, and Turbo
 - Separate CPU, GPU, foreground-process, and thermal evidence timers
-- Conservative downshifts with hysteresis and fresh-telemetry requirements
+- Deliberate downshifts with hysteresis and fresh-telemetry checks
 - Per-application minimum or forced profile rules
 - Display-off-safe G-Helper commands that do not inject keyboard input
 - Optional Windows Dynamic Lighting ownership
@@ -42,15 +64,15 @@ The startup task is named `GHelperAutoMode_<SID>`. It appears in Task Scheduler,
 - **Auto**: use the adaptive policy.
 - **Force Silent**, **Force Balanced**, **Force Turbo**: hold an exact profile.
 - **Pause automation**: stop issuing automatic profile changes.
-- **Prefer Silent at low load**: allow Silent during normal active use.
-- **Stage sustained Turbo via Balanced**: optionally insert a short Balanced step before sustained Turbo promotion.
+- **Use Silent at low load**: allow Silent during normal active use.
+- **Pass through Balanced before Turbo**: optionally spend a short time in Balanced before a normal sustained-load move to Turbo.
 - **Keyboard lighting**: select the lighting owner.
-- **Logging enabled**: enable or disable persistent logging.
+- **Save logs**: keep a rotating diagnostic log on disk.
 - **Show diagnostics**: show current telemetry, state, transport, startup, and lighting information.
 
 ## Adaptive profile policy
 
-Default thresholds are stored in [`examples/config.example.json`](examples/config.example.json). The values below describe the supplied defaults.
+The default thresholds live in [`examples/config.example.json`](examples/config.example.json). AutoMode waits for a signal to stay above its threshold; a single brief spike is not enough.
 
 ### Promotion to Balanced
 
@@ -76,7 +98,7 @@ Balanced is requested when any enabled path remains above its threshold for the 
 | CPU temperature | 75 C | 10 s |
 | GPU temperature | 75 C | 10 s |
 
-Promotion evidence belongs to its signal rather than the current profile. Entering Balanced does not reset an already-running Turbo timer. CPU and GPU temperature timers are independent.
+Each signal keeps its own timer. Moving into Balanced does not erase a Turbo timer that was already building, and CPU and GPU temperature do not share a timer.
 
 With `StepwiseAutomaticUpshifts=false`, mature Turbo evidence can move directly from Silent to Turbo. The optional staged mode inserts the configured `BalancedBeforeTurboSeconds` delay for normal sustained-load promotion; fast, thermal, and application-rule Turbo requests remain direct.
 
@@ -114,16 +136,16 @@ This separation prevents profile changes from waking a powered-off display. The 
 
 ## Keyboard lighting
 
-The tray menu provides four mutually exclusive modes:
+Only one system should control the keyboard backlight. The tray menu gives you four choices:
 
 | Mode | Behavior |
 | --- | --- |
-| **Do not manage lighting** | Leave Windows and G-Helper lighting settings unchanged. This is the default for new and migrated configurations. |
-| **Windows owns - Dynamic Lighting** | Enable Windows Dynamic Lighting, set G-Helper `skip_aura=1`, and disable foreground-app takeover at the Windows Lighting root and each discovered device. Existing Windows effect, brightness, speed, accent, and color settings are preserved. |
-| **G-Helper owns - Windows accent color** | Disable Dynamic Lighting, select G-Helper static Aura mode, and synchronize `aura_color` with the current Windows accent. |
-| **G-Helper owns - existing manual Aura** | Disable Dynamic Lighting, set `skip_aura=0`, and preserve the existing G-Helper Aura mode and colors. |
+| **Leave lighting alone** | Do not change Windows or G-Helper lighting settings. This is the default for new and upgraded configs. |
+| **Windows controls lighting** | Turn on Windows Dynamic Lighting, tell G-Helper to release Aura, and block foreground apps from taking over the discovered lighting devices. Your existing Windows effect, brightness, speed, and color stay in place. |
+| **G-Helper uses the Windows accent color** | Turn off Dynamic Lighting, use G-Helper's static Aura mode, and update it when the Windows accent color changes. |
+| **G-Helper keeps its current Aura settings** | Turn off Dynamic Lighting, let G-Helper control the keyboard, and keep its current Aura mode and colors. |
 
-Ownership is reconciled automatically at startup, after logon, console connection, unlock, and resume, and when an out-of-band G-Helper Aura change is detected. A 30-second registry heartbeat refreshes Windows ownership without toggling Dynamic Lighting off and on. **Re-apply selected ownership now** is a recovery command and is not required during normal use.
+AutoMode checks this choice at startup, after sign-in, unlock, resume, and any outside G-Helper Aura change it notices. A small 30-second registry check keeps Windows in control when that mode is selected; it does not flash Dynamic Lighting off and on. **Apply this lighting choice again** is there for recovery and should not be needed day to day.
 
 Lighting checks run at the configured interval, five seconds by default. An unchanged check only reads a small JSON file and a few registry values. It does not restart G-Helper, write a log entry, or toggle lighting. In Windows-owned mode, Windows applies the selected color. In G-Helper accent mode, G-Helper is reloaded only when the resolved accent value actually changes.
 
@@ -200,15 +222,21 @@ After a new build, verify:
 
 Build and target-machine checks are recorded in [`docs/RELEASE_VALIDATION.md`](docs/RELEASE_VALIDATION.md).
 
-## Scope
+## What AutoMode does not manage
 
-AutoMode does not directly change ASUS fan curves, CPU or GPU power limits, boost settings, GPU mode, overclocking, undervolting, temperature targets, display refresh rate, battery charge limits, or sleep policy.
+AutoMode does not directly change fan curves, CPU or GPU power limits, boost settings, GPU mode, overclocking, undervolting, temperature targets, refresh rate, battery charge limits, or sleep policy. Those settings remain in G-Helper, firmware, or Windows.
 
 ## References
 
 - [G-Helper repository](https://github.com/seerge/g-helper)
+- [G-Helper requirements and Armoury Crate guidance](https://github.com/seerge/g-helper/wiki/Requirements)
+- [ASUS Armoury Crate FAQ and uninstall instructions](https://www.asus.com/support/faq/1041654/)
 - [G-Helper power-user settings](https://github.com/seerge/g-helper/wiki/Power-user-settings)
 - [Microsoft Dynamic Lighting](https://learn.microsoft.com/windows/apps/develop/devices-sensors/lighting-dynamic-lamparray)
 - [Microsoft SendInput](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)
 - [Microsoft power setting GUIDs](https://learn.microsoft.com/windows/win32/power/power-setting-guids)
 - [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0)
+
+## License
+
+No license has been added. The source is public to read, but reuse and redistribution are not granted automatically.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.4.2 - Clearer interface and setup guidance
+
+- Explained how G-Helper and AutoMode can replace the laptop-control part of Armoury Crate, including the limits and a safe migration path.
+- Rewrote tray labels, lighting statuses, recovery messages, and configuration warnings in plainer English.
+- Added direct links to the official G-Helper requirements and ASUS Armoury Crate uninstall instructions.
+- Kept performance decisions, timing, startup behavior, and lighting ownership logic unchanged.
+
 ## 4.4.1 - Repository and documentation maintenance
 
 - Organized C# sources, assets, scripts, examples, and technical documents into dedicated directories.

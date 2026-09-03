@@ -75,7 +75,7 @@ internal static class Program
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"GHelperAutoMode encountered an unexpected fatal error and has to close.\n\n{ex.GetType().Name}: {ex.Message}",
+                $"GHelperAutoMode hit an unexpected error and needs to close.\n\n{ex.GetType().Name}: {ex.Message}",
                 "GHelperAutoMode",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);

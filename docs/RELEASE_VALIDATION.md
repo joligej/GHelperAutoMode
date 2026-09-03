@@ -1,6 +1,6 @@
 # Release validation
 
-This document records the release checks for GHelperAutoMode 4.4.1. `SOURCE_MANIFEST.sha256` identifies the source and documentation included in the build.
+This document records the release checks for GHelperAutoMode 4.4.2. `SOURCE_MANIFEST.sha256` identifies the source and documentation included in the build.
 
 ## Validation scope
 
@@ -44,7 +44,7 @@ Relevant findings:
 The build preflight verifies that:
 
 - the example uses schema 7 and defaults lighting to `Unmanaged`;
-- project, assembly, and file versions are 4.4.1;
+- project, assembly, and file versions are 4.4.2;
 - every `ThresholdConfig` property exists in the example and no unknown threshold is present;
 - entry and reset thresholds form valid hysteresis bands;
 - the non-waking display branch precedes normal `SendInput` use;
@@ -78,10 +78,10 @@ Validation environment:
 - Compiler errors: 0
 - Self-contained single-file publish: passed
 - Formatter and analyzer verification: passed
-- FileVersion: 4.4.1.0
-- ProductVersion: 4.4.1
-- Executable size: 116,340,914 bytes
-- Executable SHA-256: `1CD3772BB8AC0AC412A1BCFDB8FA8C717B6247195E7618860E1D1FDCF7BF1B8A`
+- FileVersion: 4.4.2.0
+- ProductVersion: 4.4.2
+- Executable size: 116,336,818 bytes
+- Executable SHA-256: `F9D278C02DB276368B32291F44CFA411D786F2F8C6194091784408BF05721BEC`
 - Clean-publish reproducibility: identical executable hash from the repository root and an isolated committed-source copy
 
 ## Target-machine checks
@@ -96,7 +96,7 @@ The previous 4.4.0 runtime validation established:
 - display state `Unknown` used direct non-waking `WM_HOTKEY` delivery for profile changes;
 - the final runtime emitted no new warnings or errors.
 
-The 4.4.1 build was then started through the existing SID-scoped task. The check confirmed:
+The 4.4.2 build was then started through the existing SID-scoped task. The check confirmed:
 
 - the task still points to `dist\self-contained\GHelperAutoMode.exe --startup` and reports a running instance;
 - AutoMode and G-Helper are both running;
@@ -104,4 +104,4 @@ The 4.4.1 build was then started through the existing SID-scoped task. The check
 - G-Helper reports `skip_aura=0` and Windows Dynamic Lighting remains disabled, as required for the selected owner;
 - the user's disabled logging preference was preserved.
 
-Because logging was disabled before this run, runtime health was checked through process, task, configuration, and registry state rather than by claiming an empty log as evidence. This release changes repository layout, documentation, package paths, and English UI labels; it does not change the performance or ownership policy.
+Logging was already disabled, so the runtime check used process, task, configuration, and registry state. Version 4.4.2 changes documentation and user-facing wording; it does not change the performance or lighting policy.

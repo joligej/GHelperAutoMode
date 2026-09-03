@@ -57,7 +57,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _logger.Warn(
                 $"Windows session notifications could not be registered (Win32 error {_powerWindow.SessionRegistrationError}); "
-                + "Dynamic Lighting ownership will still be reconciled periodically.");
+                + "AutoMode will still check Dynamic Lighting control regularly.");
         }
 
         var cpu = new CpuMonitor();
@@ -71,7 +71,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _turboItem = MakeControlItem("Force Turbo", ControlState.ForceTurbo);
         _pauseItem = MakeControlItem("Pause automation", ControlState.Pause);
 
-        _preferSilentItem = new ToolStripMenuItem("Prefer Silent at low load")
+        _preferSilentItem = new ToolStripMenuItem("Use Silent at low load")
         {
             Checked = _configService.Current.PreferSilentAtLowLoad,
             CheckOnClick = true
@@ -79,9 +79,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _preferSilentItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
             _preferSilentItem,
             value => _configService.Current.PreferSilentAtLowLoad = value,
-            "Prefer Silent at low load");
+            "Use Silent at low load");
 
-        _stepwiseUpshiftItem = new ToolStripMenuItem("Stage sustained Turbo via Balanced")
+        _stepwiseUpshiftItem = new ToolStripMenuItem("Pass through Balanced before Turbo")
         {
             Checked = _configService.Current.StepwiseAutomaticUpshifts,
             CheckOnClick = true
@@ -89,23 +89,23 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _stepwiseUpshiftItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
             _stepwiseUpshiftItem,
             value => _configService.Current.StepwiseAutomaticUpshifts = value,
-            "Stage sustained Turbo via Balanced");
+            "Pass through Balanced before Turbo");
 
-        var adaptiveMenu = new ToolStripMenuItem("Adaptive behavior");
+        var adaptiveMenu = new ToolStripMenuItem("Automatic switching");
         adaptiveMenu.DropDownItems.Add(_preferSilentItem);
         adaptiveMenu.DropDownItems.Add(_stepwiseUpshiftItem);
 
         _lightingUnmanagedItem = MakeLightingItem(
-            "Do not manage lighting",
+            "Leave lighting alone",
             KeyboardLightingMode.Unmanaged);
         _lightingDynamicItem = MakeLightingItem(
-            "Windows owns - Dynamic Lighting",
+            "Windows controls lighting",
             KeyboardLightingMode.WindowsDynamicLighting);
         _lightingAccentItem = MakeLightingItem(
-            "G-Helper owns - Windows accent color",
+            "G-Helper uses the Windows accent color",
             KeyboardLightingMode.GHelperWindowsAccent);
         _lightingManualItem = MakeLightingItem(
-            "G-Helper owns - existing manual Aura",
+            "G-Helper keeps its current Aura settings",
             KeyboardLightingMode.GHelperManual);
         _lightingStatusItem = new ToolStripMenuItem("Status: starting...")
         {
@@ -115,7 +115,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var openDynamicLightingSettingsItem = new ToolStripMenuItem("Open Windows Dynamic Lighting settings...");
         openDynamicLightingSettingsItem.Click += (_, _) => OpenPath("ms-settings:personalization-lighting");
 
-        var reapplyLightingOwnershipItem = new ToolStripMenuItem("Re-apply selected ownership now");
+        var reapplyLightingOwnershipItem = new ToolStripMenuItem("Apply this lighting choice again");
         reapplyLightingOwnershipItem.Click += async (_, _) => await ReapplyLightingOwnershipAsync();
 
         _lightingMenu = new ToolStripMenuItem("Keyboard lighting");
@@ -132,7 +132,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         UpdateLightingChecks(_configService.Current.KeyboardLighting.Mode);
         UpdateLightingStatus();
 
-        _loggingItem = new ToolStripMenuItem("Logging enabled")
+        _loggingItem = new ToolStripMenuItem("Save logs")
         {
             Checked = _configService.Current.Logging.Enabled,
             CheckOnClick = true
@@ -155,10 +155,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var copyDiagnosticsItem = new ToolStripMenuItem("Copy diagnostics");
         copyDiagnosticsItem.Click += (_, _) => CopyDiagnostics();
 
-        var openConfigItem = new ToolStripMenuItem("Open Auto Mode config.json");
+        var openConfigItem = new ToolStripMenuItem("Open AutoMode config");
         openConfigItem.Click += (_, _) => OpenPath(_configService.ConfigPath);
 
-        var openGHelperConfigItem = new ToolStripMenuItem("Open G-Helper config.json");
+        var openGHelperConfigItem = new ToolStripMenuItem("Open G-Helper config");
         openGHelperConfigItem.Click += (_, _) => OpenPath(_gHelper.ConfigPath);
 
         var openLogsItem = new ToolStripMenuItem("Open log folder");
@@ -280,7 +280,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _configService.Current.KeyboardLighting.Mode = previous;
             UpdateLightingChecks(previous);
             MessageBox.Show(
-                $"Could not save the keyboard-lighting mode:\n\n{ex.Message}",
+                $"Could not save this lighting choice:\n\n{ex.Message}",
                 "G-Helper Auto Mode",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -299,8 +299,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (!result.Success)
             {
                 MessageBox.Show(
-                    "The selected lighting mode was saved and will be retried automatically, "
-                    + $"but it could not be applied completely right now:\n\n{result.Message}",
+                    "Your lighting choice was saved and AutoMode will try again, "
+                    + $"but AutoMode could not finish applying it right now:\n\n{result.Message}",
                     "G-Helper Auto Mode",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -329,14 +329,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var result = await _lightingManager.ApplyNowAsync(
-                "manual ownership reassertion",
+                "manual lighting retry",
                 forceGHelperReload: mode != KeyboardLightingMode.Unmanaged,
                 forceOwnershipRefresh: mode == KeyboardLightingMode.WindowsDynamicLighting);
 
             if (!result.Success)
             {
                 MessageBox.Show(
-                    $"Keyboard-lighting ownership could not be re-applied completely:\n\n{result.Message}",
+                    $"AutoMode could not fully apply this lighting choice:\n\n{result.Message}",
                     "G-Helper Auto Mode",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -355,10 +355,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     private void PowerWindowOnResumeForLighting() =>
-        _lightingManager.QueueOwnershipReassertion("resume ownership reassertion");
+        _lightingManager.QueueOwnershipReassertion("resume lighting check");
 
     private void PowerWindowOnSessionReady() =>
-        _lightingManager.QueueOwnershipReassertion("session ownership reassertion");
+        _lightingManager.QueueOwnershipReassertion("session lighting check");
 
     private void LightingManagerOnStatusChanged() => UpdateLightingStatus();
 
@@ -366,17 +366,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         var lighting = _lightingManager.GetSnapshot();
         _lightingStatusItem.Text = lighting.LastApplyFailed
-            ? "Status: apply failed (see diagnostics)"
+            ? "Status: could not apply (see diagnostics)"
             : lighting.DesiredMode switch
             {
                 KeyboardLightingMode.WindowsDynamicLighting => lighting.DynamicOwnershipHealthy
-                    ? $"Status: Windows owns - {FormatArgb(lighting.EffectiveDynamicLightingArgb)}"
-                    : "Status: Windows ownership pending",
+                    ? $"Status: Windows is in control - {FormatArgb(lighting.EffectiveDynamicLightingArgb)}"
+                    : "Status: waiting for Windows",
                 KeyboardLightingMode.GHelperWindowsAccent => lighting.WindowsAccentArgb.HasValue
-                    ? $"Status: Windows accent #{lighting.WindowsAccentArgb.Value & 0x00FFFFFFu:X6}"
+                    ? $"Status: G-Helper accent #{lighting.WindowsAccentArgb.Value & 0x00FFFFFFu:X6}"
                     : "Status: Windows accent unavailable",
-                KeyboardLightingMode.GHelperManual => "Status: G-Helper manual Aura",
-                _ => "Status: not managed"
+                KeyboardLightingMode.GHelperManual => "Status: G-Helper is keeping its Aura settings",
+                _ => "Status: lighting left alone"
             };
         _lightingStatusItem.ToolTipText = lighting.LastResult;
     }
@@ -403,7 +403,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _updatingUi = false;
 
             MessageBox.Show(
-                $"Could not save adaptive behavior setting:\n\n{ex.Message}",
+                $"Could not save this automatic-switching setting:\n\n{ex.Message}",
                 "G-Helper Auto Mode",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -421,13 +421,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         try
         {
             if (!enabled)
-                _logger.Info("Logging disabled from tray menu.");
+                _logger.Info("Log saving disabled from tray menu.");
 
             _configService.Current.Logging.Enabled = enabled;
             _configService.Save();
 
             if (enabled)
-                _logger.Info("Logging enabled from tray menu.");
+                _logger.Info("Log saving enabled from tray menu.");
         }
         catch (Exception ex)
         {
@@ -560,8 +560,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         AppendInvariant(sb, $"Process integrity: AutoMode={StartupManager.CurrentProcessIntegrity}; G-Helper={StartupManager.GHelperProcessIntegrity}");
         AppendInvariant(sb, $"Control: {_engine.ControlState}");
         AppendInvariant(sb, $"Current mode: {_engine.CurrentMode}");
-        AppendInvariant(sb, $"Prefer Silent at low load: {_configService.Current.PreferSilentAtLowLoad}");
-        AppendInvariant(sb, $"Stage sustained Turbo via Balanced: {_configService.Current.StepwiseAutomaticUpshifts}");
+        AppendInvariant(sb, $"Use Silent at low load: {_configService.Current.PreferSilentAtLowLoad}");
+        AppendInvariant(sb, $"Pass through Balanced before Turbo: {_configService.Current.StepwiseAutomaticUpshifts}");
         AppendInvariant(sb, $"Keyboard lighting target: {lighting.DesiredMode}");
         AppendInvariant(sb, $"Windows Dynamic Lighting enabled: {(lighting.DynamicLightingEnabled.HasValue ? lighting.DynamicLightingEnabled.Value.ToString() : "unknown")}");
         AppendInvariant(sb, $"Foreground-app lighting takeover allowed: {BoolValue(lighting.ForegroundAppControlEnabled)}");
@@ -571,7 +571,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         AppendInvariant(sb, $"Dynamic Lighting ownership healthy: {lighting.DynamicOwnershipHealthy}");
         AppendInvariant(sb, $"Windows accent: {(lighting.WindowsAccentArgb.HasValue ? $"#{lighting.WindowsAccentArgb.Value & 0x00FFFFFFu:X6}" : "unavailable")}");
         AppendInvariant(sb, $"G-Helper lighting: skip_aura={Value(lighting.GHelperSkipAura)}, aura_mode={Value(lighting.GHelperAuraMode)}, aura_color={FormatColor(lighting.GHelperAuraColor)}");
-        AppendInvariant(sb, $"Last lighting reconciliation: {lighting.LastResult}");
+        AppendInvariant(sb, $"Last lighting check: {lighting.LastResult}");
         AppendInvariant(sb, $"Evidence policy: promotion timers are mode-independent; downshift timers are mode-scoped; CPU/GPU thermal clocks are separate");
         AppendInvariant(sb, $"Last decision: {_engine.LastDecision}");
         AppendInvariant(sb, $"Transition progress: {_engine.TransitionProgress}");
@@ -667,7 +667,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (!_configService.Current.AutomationEnabled) issues.Add("automation disabled in config");
         var lighting = _lightingManager.GetSnapshot();
         if (lighting.DesiredMode != KeyboardLightingMode.Unmanaged && lighting.LastApplyFailed)
-            issues.Add("keyboard-lighting reconciliation failed");
+            issues.Add("keyboard-lighting update failed");
         if (lighting.DesiredMode == KeyboardLightingMode.WindowsDynamicLighting && !lighting.DynamicOwnershipHealthy)
             issues.Add("Windows Dynamic Lighting ownership is not established on every device");
         if (_lastStatus is not null)
