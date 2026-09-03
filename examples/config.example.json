@@ -1,0 +1,106 @@
+{
+  "SchemaVersion": 7,
+  "AutomationEnabled": true,
+  "StartupGraceSeconds": 12,
+  "PollIntervalMilliseconds": 1000,
+  "RequireGHelperRunning": true,
+  "ShowModeChangeNotifications": false,
+  "RespectExternalModeChanges": true,
+  "ExternalModeChangeHoldSeconds": 180,
+  "ModeConfirmationTimeoutSeconds": 5,
+  "LateConfirmationGraceSeconds": 20,
+  "InputGuardEnabled": true,
+  "PreferSilentAtLowLoad": true,
+  "StepwiseAutomaticUpshifts": false,
+  "KeyboardLighting": {
+    "Mode": "Unmanaged",
+    "AccentPollIntervalSeconds": 5
+  },
+  "Logging": {
+    "Enabled": true,
+    "MaxFileSizeMB": 5,
+    "KeepFiles": 3,
+    "TelemetryIntervalSeconds": 0
+  },
+  "Thresholds": {
+    "LoadAverageSeconds": 5,
+    "BalancedCpuPercent": 22,
+    "BalancedCpuResetPercent": 15,
+    "BalancedCpuSeconds": 3,
+    "BalancedGpuPercent": 18,
+    "BalancedGpuResetPercent": 10,
+    "BalancedGpuSeconds": 3,
+    "ForegroundBalancedCoreEquivalentPercent": 40,
+    "ForegroundBalancedCoreEquivalentResetPercent": 25,
+    "ForegroundBalancedSeconds": 2,
+    "BalancedThermalTempC": 65,
+    "BalancedThermalSeconds": 10,
+    "TurboThermalTempC": 75,
+    "TurboThermalSeconds": 10,
+    "TurboCpuPercent": 50,
+    "TurboCpuResetPercent": 40,
+    "TurboCpuSeconds": 5,
+    "TurboGpuPercent": 45,
+    "TurboGpuResetPercent": 35,
+    "TurboGpuSeconds": 4,
+    "FastTurboCpuPercent": 75,
+    "FastTurboCpuResetPercent": 60,
+    "FastTurboCpuSeconds": 2,
+    "FastTurboGpuPercent": 80,
+    "FastTurboGpuResetPercent": 65,
+    "FastTurboGpuSeconds": 2,
+    "ForegroundTurboCoreEquivalentPercent": 70,
+    "ForegroundTurboCoreEquivalentResetPercent": 45,
+    "ForegroundTurboSeconds": 3,
+    "TurboExitCpuBelowPercent": 35,
+    "TurboExitGpuBelowPercent": 35,
+    "TurboExitMaxTempC": 68,
+    "TurboExitSeconds": 25,
+    "SilentCpuBelowPercent": 12,
+    "SilentGpuBelowPercent": 8,
+    "SilentCpuTempMaxC": 60,
+    "SilentGpuTempMaxC": 62,
+    "ActiveDisplaySilentSeconds": 60,
+    "DisplayOffSilentSeconds": 20,
+    "BalancedBeforeTurboSeconds": 3,
+    "TurboMinimumSeconds": 30,
+    "PostTurboBalancedSeconds": 30,
+    "ModeChangeCooldownSeconds": 3,
+    "AppRuleDebounceSeconds": 1,
+    "CpuTemperatureGraceSeconds": 5,
+    "GpuTelemetryGraceSeconds": 10,
+    "AllowDowngradeWhenGpuUnavailable": false
+  },
+  "AppRules": [
+    {
+      "Process": "Revit.exe",
+      "Action": "MinimumBalanced",
+      "Enabled": true,
+      "ApplyWhenDisplayOff": false
+    },
+    {
+      "Process": "acad.exe",
+      "Action": "MinimumBalanced",
+      "Enabled": true,
+      "ApplyWhenDisplayOff": false
+    },
+    {
+      "Process": "FurMark*.exe",
+      "Action": "MinimumTurbo",
+      "Enabled": true,
+      "ApplyWhenDisplayOff": false
+    },
+    {
+      "Process": "3DMark*.exe",
+      "Action": "MinimumTurbo",
+      "Enabled": true,
+      "ApplyWhenDisplayOff": false
+    },
+    {
+      "Process": "YourGame.exe",
+      "Action": "ForceTurbo",
+      "Enabled": false,
+      "ApplyWhenDisplayOff": false
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+dist/
+
+# IDE and user state
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Local diagnostics and temporary files
+*.dmp
+*.tmp
+*.log
+.audit-*/
