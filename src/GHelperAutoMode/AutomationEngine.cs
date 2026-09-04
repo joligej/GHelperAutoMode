@@ -244,7 +244,9 @@ internal sealed class AutomationEngine : IDisposable
             // Finish it first, then take every other sample against one coherent monotonic
             // timestamp. This avoids inflating foreground CPU when a slow nvidia-smi call
             // makes the old tick timestamp lag behind the actual process-time read.
-            var gpuTelemetry = await _gpuMonitor.SampleAsync(_configService.Current.Thresholds.GpuTelemetryGraceSeconds);
+            var gpuTelemetry = await _gpuMonitor.SampleAsync(
+                _configService.Current.Thresholds.GpuTelemetryGraceSeconds,
+                _configService.Current.Telemetry);
             if (tickEpoch != _stateEpoch)
                 return;
 
@@ -429,10 +431,10 @@ internal sealed class AutomationEngine : IDisposable
             t.ForegroundTurboCoreEquivalentResetPercent,
             now);
 
-        // Thermal promotion evidence is mode-independent and sensor-specific. Both the
-        // 65 C and 75 C clocks run in parallel from the instant their own threshold is
-        // first observed. A Silent -> Balanced transition therefore cannot restart the
-        // 75 C clock. CPU and GPU clocks are separate as well, so evidence is never
+        // Thermal promotion evidence is mode-independent and sensor-specific. The
+        // configured Balanced and Turbo clocks run in parallel from the instant their
+        // own threshold is first observed. A Silent -> Balanced transition therefore
+        // cannot restart the Turbo clock. CPU and GPU clocks are separate, so evidence is never
         // accidentally spliced across two different physical sensors.
         UpdateQualityAwareSustainedAbove(
             ref _balancedCpuThermalSince,
@@ -607,9 +609,9 @@ internal sealed class AutomationEngine : IDisposable
                 IgnoreCooldown: true);
         }
 
-        // A sustained >=75 C condition is already delayed evidence that the current
-        // profile lacks headroom. Honour it directly, even from Silent, rather than
-        // adding another stepwise delay after those ten seconds.
+        // Mature Turbo thermal evidence already shows that the current profile lacks
+        // headroom. Honour it directly, even from Silent, rather than adding another
+        // stepwise delay.
         if (turboThermal && _currentMode != PerformanceMode.Turbo)
         {
             return new Decision(
@@ -643,7 +645,7 @@ internal sealed class AutomationEngine : IDisposable
                 IgnoreCooldown: true);
         }
 
-        // The fast path is intentionally direct: an unmistakable 75% CPU / 80% GPU burst
+        // The fast path is intentionally direct: a burst at the configured fast threshold
         // has already been debounced and should not lose more performance to an extra
         // Silent -> Balanced -> Turbo staging delay.
         if (fastTurbo && _currentMode != PerformanceMode.Turbo)

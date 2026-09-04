@@ -1,5 +1,5 @@
 {
-  "SchemaVersion": 7,
+  "SchemaVersion": 8,
   "AutomationEnabled": true,
   "StartupGraceSeconds": 12,
   "PollIntervalMilliseconds": 1000,
@@ -14,7 +14,21 @@
   "StepwiseAutomaticUpshifts": false,
   "KeyboardLighting": {
     "Mode": "Unmanaged",
-    "AccentPollIntervalSeconds": 5
+    "AccentPollIntervalSeconds": 5,
+    "OwnershipHeartbeatSeconds": 30,
+    "SessionRecoveryDelayMilliseconds": 900,
+    "GHelperConfigReadAttempts": 3,
+    "GHelperConfigReadRetryMilliseconds": 50,
+    "GHelperRestartTimeoutSeconds": 8,
+    "GHelperProcessPollMilliseconds": 100,
+    "GHelperTaskStartAttempts": 3,
+    "GHelperTaskRetryMilliseconds": 300
+  },
+  "Telemetry": {
+    "NvidiaSmiPollIntervalSeconds": 4,
+    "NvidiaSmiTimeoutSeconds": 2,
+    "NvmlRecoveryIntervalSeconds": 60,
+    "NvmlFailuresBeforeReset": 3
   },
   "Logging": {
     "Enabled": true,

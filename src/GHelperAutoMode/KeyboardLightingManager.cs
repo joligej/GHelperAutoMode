@@ -61,9 +61,6 @@ internal sealed class KeyboardLightingManager : IDisposable
     private const string DwmRegistryPath = @"Software\Microsoft\Windows\DWM";
     private const string GHelperExitEventName = @"Global\GHelperApp-Exit";
     private const int GHelperStaticAuraMode = 0;
-    private static readonly TimeSpan OwnershipHeartbeat = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan SessionReassertDelay = TimeSpan.FromMilliseconds(900);
-
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
         WriteIndented = true
@@ -232,7 +229,9 @@ internal sealed class KeyboardLightingManager : IDisposable
     {
         try
         {
-            await Task.Delay(SessionReassertDelay, _lifetimeCancellation.Token);
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(_configService.Current.KeyboardLighting.SessionRecoveryDelayMilliseconds),
+                _lifetimeCancellation.Token);
             if (_disposed || generation != Volatile.Read(ref _sessionReassertGeneration))
                 return;
 
@@ -297,7 +296,8 @@ internal sealed class KeyboardLightingManager : IDisposable
             if (!gHelperResult.Success)
                 return gHelperResult;
 
-            var heartbeatDue = DateTime.UtcNow - _lastOwnershipRefreshUtc >= OwnershipHeartbeat;
+            var heartbeatDue = DateTime.UtcNow - _lastOwnershipRefreshUtc >= TimeSpan.FromSeconds(
+                _configService.Current.KeyboardLighting.OwnershipHeartbeatSeconds);
             var refreshOwnership = forceOwnershipRefresh ||
                                    releaseGHelperLighting ||
                                    gHelperResult.Changed ||
@@ -435,7 +435,8 @@ internal sealed class KeyboardLightingManager : IDisposable
     private async Task<JsonObject> ReadGHelperConfigAsync()
     {
         Exception? lastError = null;
-        for (var attempt = 0; attempt < 3; attempt++)
+        var settings = _configService.Current.KeyboardLighting;
+        for (var attempt = 0; attempt < settings.GHelperConfigReadAttempts; attempt++)
         {
             try
             {
@@ -459,8 +460,8 @@ internal sealed class KeyboardLightingManager : IDisposable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
                 lastError = ex;
-                if (attempt < 2)
-                    await Task.Delay(50);
+                if (attempt + 1 < settings.GHelperConfigReadAttempts)
+                    await Task.Delay(settings.GHelperConfigReadRetryMilliseconds);
             }
         }
 
@@ -757,7 +758,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         }
     }
 
-    private static async Task<bool> StopGHelperAsync()
+    private async Task<bool> StopGHelperAsync()
     {
         if (!IsGHelperRunning(out _))
             return true;
@@ -776,23 +777,25 @@ internal sealed class KeyboardLightingManager : IDisposable
             return false;
         }
 
-        var deadline = DateTime.UtcNow.AddSeconds(8);
+        var settings = _configService.Current.KeyboardLighting;
+        var deadline = DateTime.UtcNow.AddSeconds(settings.GHelperRestartTimeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {
             if (!IsGHelperRunning(out _))
                 return true;
-            await Task.Delay(100);
+            await Task.Delay(settings.GHelperProcessPollMilliseconds);
         }
 
         return !IsGHelperRunning(out _);
     }
 
-    private static async Task<bool> StartGHelperAsync(string? fallbackExecutablePath)
+    private async Task<bool> StartGHelperAsync(string? fallbackExecutablePath)
     {
+        var settings = _configService.Current.KeyboardLighting;
         var sid = WindowsIdentity.GetCurrent().User?.Value;
         if (!string.IsNullOrWhiteSpace(sid))
         {
-            for (var attempt = 0; attempt < 3; attempt++)
+            for (var attempt = 0; attempt < settings.GHelperTaskStartAttempts; attempt++)
             {
                 try
                 {
@@ -822,8 +825,8 @@ internal sealed class KeyboardLightingManager : IDisposable
 
                 if (IsGHelperRunning(out _))
                     return true;
-                if (attempt < 2)
-                    await Task.Delay(300);
+                if (attempt + 1 < settings.GHelperTaskStartAttempts)
+                    await Task.Delay(settings.GHelperTaskRetryMilliseconds);
             }
         }
 
@@ -848,14 +851,15 @@ internal sealed class KeyboardLightingManager : IDisposable
         }
     }
 
-    private static async Task<bool> WaitForGHelperStartAsync()
+    private async Task<bool> WaitForGHelperStartAsync()
     {
-        var deadline = DateTime.UtcNow.AddSeconds(8);
+        var settings = _configService.Current.KeyboardLighting;
+        var deadline = DateTime.UtcNow.AddSeconds(settings.GHelperRestartTimeoutSeconds);
         while (DateTime.UtcNow < deadline)
         {
             if (IsGHelperRunning(out _))
                 return true;
-            await Task.Delay(100);
+            await Task.Delay(settings.GHelperProcessPollMilliseconds);
         }
         return IsGHelperRunning(out _);
     }

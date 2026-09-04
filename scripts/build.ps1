@@ -27,6 +27,15 @@ function Assert-True {
     if (-not $Condition) { throw "Release preflight failed: $Message" }
 }
 
+function Test-ContainsOrdinal {
+    param(
+        [Parameter(Mandatory=$true)][string]$Text,
+        [Parameter(Mandatory=$true)][string]$Value
+    )
+
+    return $Text.IndexOf($Value, [StringComparison]::Ordinal) -ge 0
+}
+
 function Remove-BuildDirectory {
     param([Parameter(Mandatory=$true)][ValidateSet('bin', 'obj', 'dist')][string]$Name)
 
@@ -69,13 +78,15 @@ function Test-SourceManifest {
     $sourceFiles = @(
         Get-ChildItem -LiteralPath $repoRoot -File -Force |
             Where-Object Name -ne 'SOURCE_MANIFEST.sha256'
-        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs')) {
-            Get-ChildItem -LiteralPath (Join-Path $repoRoot $directory) -Recurse -File -Force
+        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs', 'installer')) {
+            Get-ChildItem -LiteralPath (Join-Path $repoRoot $directory) -Recurse -File -Force |
+                Where-Object FullName -NotMatch '\\(?:bin|obj)\\'
         }
     )
 
     foreach ($sourceFile in $sourceFiles) {
-        $relativePath = [IO.Path]::GetRelativePath($repoRoot, $sourceFile.FullName).Replace('\', '/')
+        Assert-True ($sourceFile.FullName.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) "source file escapes repository root: $($sourceFile.FullName)"
+        $relativePath = $sourceFile.FullName.Substring($rootPrefix.Length).Replace('\', '/')
         Assert-True $entries.ContainsKey($relativePath) "source file is not tracked by manifest: $relativePath"
     }
 
@@ -86,7 +97,9 @@ function Test-ReleasePreflight {
     foreach ($required in @(
         'GHelperAutoMode.csproj', 'examples\config.example.json', 'assets\automode.ico',
         'README.md', 'CHANGELOG.md', 'docs\ARCHITECTURE.md', 'docs\RELEASE_VALIDATION.md',
-        'SOURCE_MANIFEST.sha256'
+        'SOURCE_MANIFEST.sha256', 'scripts\build-installer.ps1',
+        'installer\GHelperAutoMode.Installer.wixproj', 'installer\GHelperAutoMode.wxs',
+        'installer\bootstrapper\GHelperAutoMode.Setup.csproj', 'installer\bootstrapper\Program.cs'
     )) {
         Assert-True (Test-Path (Join-Path $repoRoot $required) -PathType Leaf) "missing required source file: $required"
     }
@@ -97,13 +110,17 @@ function Test-ReleasePreflight {
     $projectVersion = [string]$propertyGroup.Version
     $t = $config.Thresholds
 
-    Assert-True ($config.SchemaVersion -eq 7) 'config.example.json must use schema 7.'
-    Assert-True ($projectVersion -eq '4.4.2') "project version is '$projectVersion', expected 4.4.2."
-    Assert-True ([string]$propertyGroup.AssemblyVersion -eq '4.4.2.0') 'AssemblyVersion must be 4.4.2.0.'
-    Assert-True ([string]$propertyGroup.FileVersion -eq '4.4.2.0') 'FileVersion must be 4.4.2.0.'
+    Assert-True ($config.SchemaVersion -eq 8) 'config.example.json must use schema 8.'
+    Assert-True ($projectVersion -eq '5.0.0') "project version is '$projectVersion', expected 5.0.0."
+    Assert-True ([string]$propertyGroup.AssemblyVersion -eq '5.0.0.0') 'AssemblyVersion must be 5.0.0.0.'
+    Assert-True ([string]$propertyGroup.FileVersion -eq '5.0.0.0') 'FileVersion must be 5.0.0.0.'
+    Assert-True ($projectXml.Project.ItemGroup.Compile.Remove -contains 'installer\**\*.cs') 'the main project must exclude installer C# sources and generated files.'
     Assert-True ($config.PollIntervalMilliseconds -ge 500) 'poll interval is below the supported floor.'
     Assert-True ([string]$config.KeyboardLighting.Mode -eq 'Unmanaged') 'example lighting mode must be opt-in (Unmanaged).'
     Assert-True ($config.KeyboardLighting.AccentPollIntervalSeconds -ge 2) 'accent poll interval is below the supported floor.'
+    Assert-True ($config.KeyboardLighting.OwnershipHeartbeatSeconds -ge 5) 'ownership heartbeat is below the supported floor.'
+    Assert-True ($config.Telemetry.NvidiaSmiPollIntervalSeconds -ge 1) 'nvidia-smi interval is below the supported floor.'
+    Assert-True ($config.Telemetry.NvidiaSmiTimeoutSeconds -ge 1) 'nvidia-smi timeout is below the supported floor.'
 
     $configThresholdNames = @($t.PSObject.Properties.Name | Sort-Object)
     $configSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\AppConfig.cs') -Raw
@@ -120,31 +137,74 @@ function Test-ReleasePreflight {
     )
     Assert-True (($configThresholdNames -join '|') -eq ($sourceThresholdNames -join '|')) 'config.example.json Thresholds do not exactly match ThresholdConfig.'
 
+    foreach ($configParity in @(
+        @{ Json = $config.KeyboardLighting; Class = 'KeyboardLightingConfig'; Types = 'int|KeyboardLightingMode'; Label = 'KeyboardLighting' },
+        @{ Json = $config.Telemetry; Class = 'TelemetryConfig'; Types = 'int'; Label = 'Telemetry' },
+        @{ Json = $config.Logging; Class = 'LoggingConfig'; Types = 'int|bool'; Label = 'Logging' }
+    )) {
+        $jsonNames = @($configParity.Json.PSObject.Properties.Name | Sort-Object)
+        $classBlock = [regex]::Match(
+            $configSource,
+            "(?s)internal sealed class $($configParity.Class)\s*\{(?<Body>.*?)\n\}")
+        Assert-True $classBlock.Success "could not locate $($configParity.Class) for config parity check."
+        $sourceNames = @(
+            [regex]::Matches(
+                $classBlock.Groups['Body'].Value,
+                "public\s+(?:$($configParity.Types))\s+(?<Name>[A-Za-z_][A-Za-z0-9_]*)\s*\{") |
+                ForEach-Object { $_.Groups['Name'].Value } |
+                Sort-Object
+        )
+        Assert-True (($jsonNames -join '|') -eq ($sourceNames -join '|')) "config.example.json $($configParity.Label) does not exactly match $($configParity.Class)."
+    }
+
     $controllerSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\GHelperController.cs') -Raw
     $wakeGuardPosition = $controllerSource.IndexOf('if (!displayState.AllowsInputInjection())', [StringComparison]::Ordinal)
     $sendInputPosition = $controllerSource.IndexOf('var sendInput = TrySendInputHotkey', [StringComparison]::Ordinal)
     Assert-True ($wakeGuardPosition -ge 0 -and $sendInputPosition -gt $wakeGuardPosition) 'display-power input guard must precede every normal SendInput request.'
-    Assert-True ($controllerSource.Contains('TryPostDirectHotkeyToGHelperWindows', [StringComparison]::Ordinal)) 'non-waking WM_HOTKEY route is missing.'
+    Assert-True (Test-ContainsOrdinal $controllerSource 'TryPostDirectHotkeyToGHelperWindows') 'non-waking WM_HOTKEY route is missing.'
 
     $lightingSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\KeyboardLightingManager.cs') -Raw
-    Assert-True ($lightingSource.Contains('DwmGetColorizationColor', [StringComparison]::Ordinal)) 'Windows accent-color API is missing.'
-    Assert-True ($lightingSource.Contains('skip_aura', [StringComparison]::Ordinal)) 'G-Helper Aura ownership switch is missing.'
-    Assert-True ($lightingSource.Contains('ControlledByForegroundApp', [StringComparison]::Ordinal)) 'foreground-app Dynamic Lighting takeover policy is missing.'
-    Assert-True ($lightingSource.Contains('forceGHelperReload: true', [StringComparison]::Ordinal)) 'session ownership recovery must release G-Helper before Windows reacquires lighting.'
-    Assert-True (-not $lightingSource.Contains('SendInput(', [StringComparison]::Ordinal)) 'keyboard lighting must never synthesize input.'
+    Assert-True (Test-ContainsOrdinal $lightingSource 'DwmGetColorizationColor') 'Windows accent-color API is missing.'
+    Assert-True (Test-ContainsOrdinal $lightingSource 'skip_aura') 'G-Helper Aura ownership switch is missing.'
+    Assert-True (Test-ContainsOrdinal $lightingSource 'ControlledByForegroundApp') 'foreground-app Dynamic Lighting takeover policy is missing.'
+    Assert-True (Test-ContainsOrdinal $lightingSource 'forceGHelperReload: true') 'session ownership recovery must release G-Helper before Windows reacquires lighting.'
+    Assert-True (-not (Test-ContainsOrdinal $lightingSource 'SendInput(')) 'keyboard lighting must never synthesize input.'
 
     $powerSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\PowerNotificationWindow.cs') -Raw
-    Assert-True ($powerSource.Contains('WTSRegisterSessionNotification', [StringComparison]::Ordinal)) 'session unlock/logon notification registration is missing.'
-    Assert-True ($powerSource.Contains('WtsSessionUnlock', [StringComparison]::Ordinal)) 'session unlock ownership recovery is missing.'
+    Assert-True (Test-ContainsOrdinal $powerSource 'WTSRegisterSessionNotification') 'session unlock/logon notification registration is missing.'
+    Assert-True (Test-ContainsOrdinal $powerSource 'WtsSessionUnlock') 'session unlock ownership recovery is missing.'
 
     $startupSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\StartupManager.cs') -Raw
-    Assert-True ($startupSource.Contains('TaskLogonInteractiveToken', [StringComparison]::Ordinal)) 'startup task must use an interactive user token.'
-    Assert-True ($startupSource.Contains('TaskRunLevelHighest', [StringComparison]::Ordinal)) 'startup task must request HighestAvailable.'
-    Assert-True ($startupSource.Contains('RegisterTaskDefinition', [StringComparison]::Ordinal)) 'Task Scheduler registration is missing.'
-    Assert-True (-not $startupSource.Contains('key.SetValue(ValueName', [StringComparison]::Ordinal)) 'startup must not be registered through HKCU Run.'
+    Assert-True (Test-ContainsOrdinal $startupSource 'TaskLogonInteractiveToken') 'startup task must use an interactive user token.'
+    Assert-True (Test-ContainsOrdinal $startupSource 'TaskRunLevelHighest') 'startup task must request HighestAvailable.'
+    Assert-True (Test-ContainsOrdinal $startupSource 'RegisterTaskDefinition') 'Task Scheduler registration is missing.'
+    Assert-True (-not (Test-ContainsOrdinal $startupSource 'key.SetValue(ValueName')) 'startup must not be registered through HKCU Run.'
+
+    $programSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\Program.cs') -Raw
+    Assert-True (Test-ContainsOrdinal $programSource '--prepare-uninstall') 'MSI uninstall preparation command is missing.'
+    Assert-True (Test-ContainsOrdinal $programSource 'ExitEventPrefix') 'cross-session uninstall shutdown event is missing.'
+    Assert-True (Test-ContainsOrdinal $programSource 'FindInstalledInstances') 'targeted uninstall process discovery is missing.'
+    Assert-True (Test-ContainsOrdinal $programSource 'instance.Kill(entireProcessTree: false)') 'targeted uninstall fallback is missing.'
+
+    $powerWindowSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\PowerNotificationWindow.cs') -Raw
+    Assert-True (Test-ContainsOrdinal $powerWindowSource 'ChangeWindowMessageFilterEx') 'cross-integrity uninstall shutdown message filter is missing.'
+    Assert-True (Test-ContainsOrdinal $powerWindowSource 'TryRequestExit') 'cross-integrity uninstall shutdown request is missing.'
+
+    $installerSource = Get-Content (Join-Path $repoRoot 'installer\GHelperAutoMode.wxs') -Raw
+    Assert-True (Test-ContainsOrdinal $installerSource 'Scope="perUserOrMachine"') 'MSI must remain a dual-purpose package.'
+    Assert-True (Test-ContainsOrdinal $installerSource 'ProductCode="{EDFEB7D7-FF3E-4258-A9A1-B41B51B98DC3}"') 'v5 MSI ProductCode must remain stable for WinGet detection and reproducible builds.'
+    Assert-True (Test-ContainsOrdinal $installerSource 'Id="ARPINSTALLLOCATION"') 'MSI install-location registration is missing.'
+    Assert-True (Test-ContainsOrdinal $installerSource '<MajorUpgrade') 'MSI major-upgrade handling is missing.'
+    Assert-True (Test-ContainsOrdinal $installerSource 'ExeCommand="--prepare-uninstall"') 'MSI uninstall cleanup action is missing.'
+
+    $setupSource = Get-Content (Join-Path $repoRoot 'installer\bootstrapper\Program.cs') -Raw
+    Assert-True (Test-ContainsOrdinal $setupSource 'TokenElevation') 'setup must inspect the real process elevation token.'
+    Assert-True (Test-ContainsOrdinal $setupSource 'ALLUSERS=1') 'setup per-machine MSI selection is missing.'
+    Assert-True ((Test-ContainsOrdinal $setupSource 'ALLUSERS=2') -and
+        (Test-ContainsOrdinal $setupSource 'MSIINSTALLPERUSER=1')) 'setup per-user MSI selection is missing.'
 
     $integritySource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\ProcessIntegrity.cs') -Raw
-    Assert-True ($integritySource.Contains('TokenIntegrityLevel', [StringComparison]::Ordinal)) 'process-integrity comparison is missing.'
+    Assert-True (Test-ContainsOrdinal $integritySource 'TokenIntegrityLevel') 'process-integrity comparison is missing.'
 
     Assert-True ($t.BalancedCpuResetPercent -lt $t.BalancedCpuPercent) 'Balanced CPU reset must be below its enter threshold.'
     Assert-True ($t.BalancedGpuResetPercent -lt $t.BalancedGpuPercent) 'Balanced GPU reset must be below its enter threshold.'

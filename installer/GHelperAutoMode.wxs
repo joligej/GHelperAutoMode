@@ -1,0 +1,71 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="G-Helper Auto Mode"
+      Manufacturer="joligej"
+      Version="$(var.InstallerVersion)"
+      Language="1033"
+      ProductCode="{EDFEB7D7-FF3E-4258-A9A1-B41B51B98DC3}"
+      UpgradeCode="{C3E10D0F-8FBD-4C20-BDBF-9E7D0F919F1A}"
+      Scope="perUserOrMachine">
+
+    <SummaryInformation Description="Automatic G-Helper performance profiles and keyboard-lighting ownership" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of G-Helper Auto Mode is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!--
+      The dual-purpose MSI defaults to the current user. The setup bootstrapper
+      chooses the scope before Windows Installer initializes the package. Direct
+      MSI deployments can request per-user with ALLUSERS=2 MSIINSTALLPERUSER=1,
+      or per-machine with ALLUSERS=1.
+    -->
+
+    <Property Id="ARPCOMMENTS" Value="Automatic G-Helper performance profiles and opt-in keyboard-lighting control." />
+    <Property Id="ARPHELPLINK" Value="https://github.com/joligej/GHelperAutoMode/issues" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/joligej/GHelperAutoMode" />
+    <Property Id="ARPPRODUCTICON" Value="AutoModeIcon" />
+    <SetProperty
+        Id="ARPINSTALLLOCATION"
+        Value="[INSTALLFOLDER]"
+        After="CostFinalize"
+        Sequence="execute"
+        Condition="NOT Installed" />
+    <Icon Id="AutoModeIcon" SourceFile="..\assets\automode.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GHelperAutoMode" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="G-Helper Auto Mode" />
+    </StandardDirectory>
+
+    <Component Id="ApplicationFiles" Directory="INSTALLFOLDER" Guid="{46F17E48-7D17-479C-A08C-888D820C6074}" Bitness="always64">
+      <File Id="AppExe" Source="$(var.PublishDir)\GHelperAutoMode.exe" KeyPath="yes">
+        <Shortcut
+            Id="StartMenuShortcut"
+            Directory="ApplicationProgramsFolder"
+            Name="G-Helper Auto Mode"
+            Description="Automatic G-Helper performance profiles"
+            WorkingDirectory="INSTALLFOLDER"
+            Advertise="yes" />
+      </File>
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+    </Component>
+
+    <CustomAction
+        Id="RemoveStartupRegistration"
+        FileRef="AppExe"
+        ExeCommand="--prepare-uninstall"
+        Execute="immediate"
+        Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RemoveStartupRegistration" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <Feature Id="MainFeature" Title="G-Helper Auto Mode" Level="1">
+      <ComponentRef Id="ApplicationFiles" />
+    </Feature>
+  </Package>
+</Wix>

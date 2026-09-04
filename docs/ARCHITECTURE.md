@@ -5,10 +5,13 @@ This note explains the rules the code is expected to keep. It is meant for anyon
 ## Components
 
 - `AutomationEngine` samples telemetry, maintains evidence timers, evaluates application rules, and selects a target performance profile.
+- `ConfigService` migrates, normalizes, copies, and atomically saves per-user configuration.
+- `SettingsForm` edits a detached working copy and validates relationships before replacing the active configuration.
 - `GHelperController` sends and confirms profile requests through G-Helper.
 - `KeyboardLightingManager` keeps the selected lighting owner in place, separately from performance-profile decisions.
 - `StartupManager` owns the per-user Task Scheduler entry and legacy-startup migration.
-- `PowerNotificationWindow` receives display, resume, and session notifications.
+- `PowerNotificationWindow` receives display, resume, session, and uninstall-shutdown messages.
+- `GHelperAutoMode.Setup` embeds the MSI and chooses its scope from the launcher's actual elevation token before Windows Installer starts.
 
 ## Performance state machine
 
@@ -30,6 +33,8 @@ GPU telemetry has four quality levels:
 `IntervalCache` may preserve an active evidence timer, but cannot complete a promotion or downshift. Completion requires a fresh sample. `GraceCache` and `Unavailable` break promotion evidence and cannot justify a downshift.
 
 CPU-temperature decisions require current, reliable data. The configured grace period avoids brief provider gaps but does not turn stale data into decision evidence.
+
+NVML recovery and `nvidia-smi` fallback cadence are configuration values. A settings reload changes them without replacing the telemetry provider. Windows and NVML API identifiers remain implementation constants because they are protocol definitions rather than policy.
 
 ### Foreground-process identity
 
@@ -123,6 +128,20 @@ AutoMode registers one per-user task with an interactive token and `HighestAvail
 
 Startup changes are read back after registration. Owned legacy `HKCU\...\Run` state is migrated. The historical `LaunchGHelper` task is removed only when its action points to GHelperAutoMode.
 
+## Configuration lifecycle
+
+Runtime data belongs to the signed-in Windows account, independent of whether application files were installed per-user or per-machine. The Settings window never edits the active object directly. It works on a deep copy, checks hysteresis and temperature ordering, validates application rules, writes a temporary JSON file, and atomically replaces `config.json`. Only then does the engine adopt the new object and reset its evidence epoch.
+
+Schema migration preserves existing decisions and writes a timestamped pre-migration copy. Missing schema 8 telemetry and lighting-recovery values receive the same defaults that were fixed implementation values in earlier versions.
+
+## Installer lifecycle
+
+Windows Installer chooses product context before normal MSI actions can inspect `MsiRunningElevated`. Trying to change scope from a later custom action can split one installation between per-user and per-machine locations. The MSI therefore remains a straightforward dual-purpose package: it defaults to `ALLUSERS=2 MSIINSTALLPERUSER=1`, and deployment tools may pass `ALLUSERS=1` before initialization for a machine install.
+
+The small native-AOT setup bootstrapper makes that choice early enough. It checks `TokenElevation` on its own process, extracts the embedded MSI to a unique file in `%TEMP%`, and starts `msiexec` with explicit scope properties. It never elevates itself. A normal launch stays per-user; **Run as administrator**, Windows `sudo`, or an already-elevated WinGet process produces a per-machine install. The temporary MSI is deleted when `msiexec` exits.
+
+Windows Installer owns the application file, advertised Start menu shortcut, upgrade registration, repair, and uninstall entry. Before a full uninstall removes files, the installed executable disables the current account's owned startup task and asks matching instances to exit. Each tray instance owns a process-specific global event, which lets the Windows Installer service reach it across sessions. A registered message to the tray's existing message-only window covers the separate case where a normal helper must reach an elevated instance in the same session; that one message is explicitly admitted through the window's UIPI filter. As a last resort, the uninstall helper terminates only processes whose executable path exactly matches the file being removed. User configuration and logs are deliberately not installer components and remain available after reinstalling.
+
 ## Shutdown
 
-Shutdown invalidates the engine epoch, cancels lighting recovery work, detaches notification handlers, stops timers, and disposes telemetry providers. Pending asynchronous results cannot update state after disposal.
+Shutdown is marshalled onto the tray's UI thread. It invalidates the engine epoch, cancels lighting recovery work, detaches notification handlers, stops timers, and disposes telemetry providers. Pending asynchronous results cannot update state after disposal. The same path runs for tray Exit and installer-requested shutdown.

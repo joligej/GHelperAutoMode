@@ -27,19 +27,19 @@ internal sealed class NvidiaGpuMonitor : IDisposable
         _nvidiaSmiPath = LocateNvidiaSmi();
     }
 
-    public async Task<GpuTelemetry> SampleAsync(int graceSeconds)
+    public async Task<GpuTelemetry> SampleAsync(int graceSeconds, TelemetryConfig settings)
     {
         if (_disposed)
             return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "disposed", "NVIDIA telemetry monitor is disposed.");
 
         var generation = _resetGeneration;
         var attemptNow = MonotonicClock.Now;
-        TryRecoverNvml(attemptNow);
+        TryRecoverNvml(attemptNow, settings);
 
-        var sample = SampleNvml(attemptNow);
+        var sample = SampleNvml(attemptNow, settings);
         if (sample is null || !sample.UtilizationPercent.HasValue)
         {
-            var fallback = await SampleNvidiaSmiAsync(generation);
+            var fallback = await SampleNvidiaSmiAsync(generation, settings);
             if (fallback is not null && fallback.UtilizationPercent.HasValue)
                 sample = fallback;
             else if (sample is null)
@@ -89,20 +89,20 @@ internal sealed class NvidiaGpuMonitor : IDisposable
             null, null, TelemetryQuality.Unavailable, "unavailable", "No NVIDIA telemetry provider is available.");
     }
 
-    private void TryRecoverNvml(long now)
+    private void TryRecoverNvml(long now, TelemetryConfig settings)
     {
         if (_nvml is not null)
             return;
 
         if (_lastNvmlAttemptAt.HasValue
-            && MonotonicClock.Elapsed(_lastNvmlAttemptAt.Value, now) < TimeSpan.FromSeconds(60))
+            && MonotonicClock.Elapsed(_lastNvmlAttemptAt.Value, now) < TimeSpan.FromSeconds(settings.NvmlRecoveryIntervalSeconds))
             return;
 
         _lastNvmlAttemptAt = now;
         _nvml = NvmlApi.TryCreate();
     }
 
-    private GpuTelemetry? SampleNvml(long now)
+    private GpuTelemetry? SampleNvml(long now, TelemetryConfig settings)
     {
         if (_nvml is null)
             return null;
@@ -116,20 +116,20 @@ internal sealed class NvidiaGpuMonitor : IDisposable
                 return sample;
             }
 
-            RegisterNvmlFailure(now);
+            RegisterNvmlFailure(now, settings);
             return sample;
         }
         catch (Exception ex)
         {
-            RegisterNvmlFailure(now);
+            RegisterNvmlFailure(now, settings);
             return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "NVML", ex.Message);
         }
     }
 
-    private void RegisterNvmlFailure(long now)
+    private void RegisterNvmlFailure(long now, TelemetryConfig settings)
     {
         _consecutiveNvmlFailures++;
-        if (_consecutiveNvmlFailures < 3 || _nvml is null)
+        if (_consecutiveNvmlFailures < settings.NvmlFailuresBeforeReset || _nvml is null)
             return;
 
         // Driver resets / resume can invalidate existing NVML handles. Drop the stale
@@ -153,7 +153,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
         _lastSmiSampleAt = null;
     }
 
-    private async Task<GpuTelemetry?> SampleNvidiaSmiAsync(int generation)
+    private async Task<GpuTelemetry?> SampleNvidiaSmiAsync(int generation, TelemetryConfig settings)
     {
         if (_nvidiaSmiPath is null)
             return null;
@@ -165,7 +165,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
         // confirmation sample while keeping fallback overhead negligible.
         if (_lastSmiSample is not null
             && _lastSmiSampleAt.HasValue
-            && MonotonicClock.Elapsed(_lastSmiSampleAt.Value, now) < TimeSpan.FromSeconds(4))
+            && MonotonicClock.Elapsed(_lastSmiSampleAt.Value, now) < TimeSpan.FromSeconds(settings.NvidiaSmiPollIntervalSeconds))
         {
             return _lastSmiSample with
             {
@@ -194,7 +194,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
             if (!process.Start())
                 return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "nvidia-smi", "Failed to start nvidia-smi.");
 
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(settings.NvidiaSmiTimeoutSeconds));
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
 

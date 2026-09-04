@@ -8,6 +8,7 @@ namespace GHelperAutoMode;
 
 internal sealed class TrayApplicationContext : ApplicationContext
 {
+    private readonly Control _dispatcher = new();
     private readonly ConfigService _configService;
     private readonly FileLogger _logger;
     private readonly PowerNotificationWindow _powerWindow;
@@ -41,9 +42,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     public TrayApplicationContext()
     {
+        _ = _dispatcher.Handle;
         _configService = new ConfigService();
         _logger = new FileLogger(_configService);
         _powerWindow = new PowerNotificationWindow();
+        _powerWindow.ExitRequested += RequestExit;
         _gHelper = new GHelperController();
         _lightingManager = new KeyboardLightingManager(_configService, _logger, _gHelper);
 
@@ -149,6 +152,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _statusItem = new ToolStripMenuItem("Starting...");
         _statusItem.Click += (_, _) => ShowDiagnostics();
 
+        var settingsItem = new ToolStripMenuItem("Settings...");
+        settingsItem.Click += (_, _) => ShowSettings();
+
         var diagnosticsItem = new ToolStripMenuItem("Show diagnostics...");
         diagnosticsItem.Click += (_, _) => ShowDiagnostics();
 
@@ -172,6 +178,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
+        menu.Items.Add(settingsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.AddRange([_autoItem, _silentItem, _balancedItem, _turboItem, _pauseItem]);
         menu.Items.Add(new ToolStripSeparator());
@@ -199,7 +206,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true
         };
-        _notifyIcon.DoubleClick += (_, _) => ShowDiagnostics();
+        _notifyIcon.DoubleClick += (_, _) => ShowSettings();
 
         _powerWindow.DisplayStateChanged += _engine.SetDisplayState;
         _powerWindow.Resumed += _engine.ResetAfterResume;
@@ -224,6 +231,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 "G-Helper Auto Mode startup",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+        }
+    }
+
+    public void RequestExit()
+    {
+        if (_dispatcher.IsDisposed)
+            return;
+
+        try
+        {
+            if (_dispatcher.InvokeRequired)
+                _dispatcher.BeginInvoke((Action)ExitThread);
+            else
+                ExitThread();
+        }
+        catch (InvalidOperationException)
+        {
+            // The UI thread is already shutting down.
         }
     }
 
@@ -410,6 +435,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private void ShowSettings()
+    {
+        using var form = new SettingsForm(_configService);
+        if (form.ShowDialog() != DialogResult.OK)
+            return;
+
+        _updatingUi = true;
+        try
+        {
+            _preferSilentItem.Checked = _configService.Current.PreferSilentAtLowLoad;
+            _stepwiseUpshiftItem.Checked = _configService.Current.StepwiseAutomaticUpshifts;
+            _loggingItem.Checked = _configService.Current.Logging.Enabled;
+            UpdateLightingChecks(_configService.Current.KeyboardLighting.Mode);
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+
+        _engine.ReloadConfig();
+        _lightingManager.ReloadConfig();
+        _logger.Info("Settings saved from the settings window.");
+    }
+
     private void ToggleLogging()
     {
         if (_updatingUi)
@@ -560,9 +609,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
         AppendInvariant(sb, $"Process integrity: AutoMode={StartupManager.CurrentProcessIntegrity}; G-Helper={StartupManager.GHelperProcessIntegrity}");
         AppendInvariant(sb, $"Control: {_engine.ControlState}");
         AppendInvariant(sb, $"Current mode: {_engine.CurrentMode}");
+        AppendInvariant(sb, $"Config schema: {_configService.Current.SchemaVersion}");
+        AppendInvariant(sb, $"Automation enabled: {_configService.Current.AutomationEnabled}");
+        AppendInvariant(sb, $"Automation poll / load window: {_configService.Current.PollIntervalMilliseconds}ms / {_configService.Current.Thresholds.LoadAverageSeconds}s");
         AppendInvariant(sb, $"Use Silent at low load: {_configService.Current.PreferSilentAtLowLoad}");
         AppendInvariant(sb, $"Pass through Balanced before Turbo: {_configService.Current.StepwiseAutomaticUpshifts}");
+        AppendInvariant(sb, $"Thermal promotion: Balanced={Fmt(_configService.Current.Thresholds.BalancedThermalTempC)}C/{_configService.Current.Thresholds.BalancedThermalSeconds}s; Turbo={Fmt(_configService.Current.Thresholds.TurboThermalTempC)}C/{_configService.Current.Thresholds.TurboThermalSeconds}s");
+        AppendInvariant(sb, $"Silent temperature ceilings: CPU={Fmt(_configService.Current.Thresholds.SilentCpuTempMaxC)}C; GPU={Fmt(_configService.Current.Thresholds.SilentGpuTempMaxC)}C");
+        AppendInvariant(sb, $"Application rules: {_configService.Current.AppRules.Count} total, {_configService.Current.AppRules.Count(rule => rule.Enabled)} enabled");
         AppendInvariant(sb, $"Keyboard lighting target: {lighting.DesiredMode}");
+        AppendInvariant(sb, $"Lighting check / ownership heartbeat / session delay: {_configService.Current.KeyboardLighting.AccentPollIntervalSeconds}s / {_configService.Current.KeyboardLighting.OwnershipHeartbeatSeconds}s / {_configService.Current.KeyboardLighting.SessionRecoveryDelayMilliseconds}ms");
         AppendInvariant(sb, $"Windows Dynamic Lighting enabled: {(lighting.DynamicLightingEnabled.HasValue ? lighting.DynamicLightingEnabled.Value.ToString() : "unknown")}");
         AppendInvariant(sb, $"Foreground-app lighting takeover allowed: {BoolValue(lighting.ForegroundAppControlEnabled)}");
         AppendInvariant(sb, $"Dynamic Lighting uses Windows accent: {BoolValue(lighting.UsesSystemAccentColor)}");
@@ -598,6 +654,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         AppendInvariant(sb, $"G-Helper disable_power_event: {Value(g.DisablePowerEvent)}");
         AppendInvariant(sb, $"G-Helper screen_auto: {Value(g.ScreenAuto)}");
         AppendInvariant(sb, $"G-Helper gpu_mode: {Value(g.GpuMode)}");
+        AppendInvariant(sb, $"NVIDIA fallback interval / timeout / NVML recovery: {_configService.Current.Telemetry.NvidiaSmiPollIntervalSeconds}s / {_configService.Current.Telemetry.NvidiaSmiTimeoutSeconds}s / {_configService.Current.Telemetry.NvmlRecoveryIntervalSeconds}s");
         AppendInvariant(sb, $"Health: {BuildHealthSummary(g)}");
 
         if (!string.IsNullOrWhiteSpace(g.Error))
@@ -750,6 +807,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _powerWindow.Resumed -= _engine.ResetAfterResume;
         _powerWindow.Resumed -= PowerWindowOnResumeForLighting;
         _powerWindow.SessionReady -= PowerWindowOnSessionReady;
+        _powerWindow.ExitRequested -= RequestExit;
         _engine.ModeChanged -= EngineOnModeChanged;
         _engine.StatusUpdated -= EngineOnStatusUpdated;
         _lightingManager.StatusChanged -= LightingManagerOnStatusChanged;
@@ -758,6 +816,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _lightingManager.Dispose();
         _engine.Dispose();
         _powerWindow.Dispose();
+        _dispatcher.Dispose();
         base.ExitThreadCore();
     }
 }

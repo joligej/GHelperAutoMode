@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <RootNamespace>GHelperAutoMode</RootNamespace>
     <AssemblyName>GHelperAutoMode</AssemblyName>
-    <Version>4.4.2</Version>
-    <AssemblyVersion>4.4.2.0</AssemblyVersion>
-    <FileVersion>4.4.2.0</FileVersion>
+    <Version>5.0.0</Version>
+    <AssemblyVersion>5.0.0.0</AssemblyVersion>
+    <FileVersion>5.0.0.0</FileVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
@@ -22,6 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="installer\**\*.cs" />
     <None Update="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="CHANGELOG.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="SOURCE_MANIFEST.sha256" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

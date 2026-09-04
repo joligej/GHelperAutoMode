@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.0.0 - Settings, Windows Installer, and WinGet
+
+- Added a complete settings window for load and temperature thresholds, timing, downshifts, application rules, lighting, NVIDIA telemetry, and logging.
+- Added cross-field validation and detached, atomic saves so Cancel and failed writes cannot partially alter the running configuration.
+- Moved the NVIDIA fallback cadence, NVML recovery, Dynamic Lighting heartbeat, and G-Helper lighting-recovery policy into schema 8 configuration.
+- Added a WiX 6 dual-purpose MSI and a small token-aware Setup executable. A normal Setup launch installs for the current account; an elevated launch installs for the machine.
+- Added Start menu, Windows Installed apps, major-upgrade, repair, and uninstall integration.
+- Made MSI uninstall disable the current account's owned startup task and close the running tray process before removing files, including when the tray is running at G-Helper's higher integrity level.
+- Kept personal configuration and logs across MSI upgrades and uninstall/reinstall cycles.
+- Prepared the versioned Setup asset and package metadata for `joligej.GHelperAutoMode` in the WinGet community repository.
+
 ## 4.4.2 - Clearer interface and setup guidance
 
 - Explained how G-Helper and AutoMode can replace the laptop-control part of Armoury Crate, including the limits and a safe migration path.

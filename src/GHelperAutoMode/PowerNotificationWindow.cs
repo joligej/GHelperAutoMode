@@ -5,6 +5,7 @@ namespace GHelperAutoMode;
 
 internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
 {
+    private const string WindowCaption = "GHelperAutoModePowerWindow";
     private const int WmPowerBroadcast = 0x0218;
     private const int PbtPowerSettingChange = 0x8013;
     private const int PbtApmResumeAutomatic = 0x0012;
@@ -15,6 +16,9 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
     private const int WtsConsoleConnect = 0x1;
     private const int WtsSessionLogon = 0x5;
     private const int WtsSessionUnlock = 0x8;
+    private const uint MsgfltAllow = 1;
+    private static readonly IntPtr HwndMessage = new(-3);
+    private static readonly uint ExitMessage = RegisterWindowMessage("GHelperAutoMode.RequestExit.v1");
 
     // Microsoft recommends GUID_SESSION_DISPLAY_STATUS for interactive user-mode applications.
     private static readonly Guid GuidSessionDisplayStatus =
@@ -32,14 +36,18 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
     public event Action<DisplayState>? DisplayStateChanged;
     public event Action? Resumed;
     public event Action? SessionReady;
+    public event Action? ExitRequested;
 
     public PowerNotificationWindow()
     {
         CreateHandle(new CreateParams
         {
-            Caption = "GHelperAutoModePowerWindow",
-            Parent = new IntPtr(-3) // HWND_MESSAGE
+            Caption = WindowCaption,
+            Parent = HwndMessage
         });
+
+        if (ExitMessage != 0)
+            _ = ChangeWindowMessageFilterEx(Handle, ExitMessage, MsgfltAllow, IntPtr.Zero);
 
         var guid = GuidSessionDisplayStatus;
         _displayRegistrationHandle = RegisterPowerSettingNotification(
@@ -74,8 +82,22 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
             if (reason is WtsConsoleConnect or WtsSessionLogon or WtsSessionUnlock)
                 SessionReady?.Invoke();
         }
+        else if (m.Msg == ExitMessage)
+        {
+            ExitRequested?.Invoke();
+            return;
+        }
 
         base.WndProc(ref m);
+    }
+
+    public static bool TryRequestExit()
+    {
+        if (ExitMessage == 0)
+            return false;
+
+        var window = FindWindowEx(HwndMessage, IntPtr.Zero, null, WindowCaption);
+        return window != IntPtr.Zero && PostMessage(window, ExitMessage, IntPtr.Zero, IntPtr.Zero);
     }
 
     private void HandleResume()
@@ -160,4 +182,26 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
     [DllImport("wtsapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterWindowMessage(string lpString);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindWindowEx(
+        IntPtr hWndParent,
+        IntPtr hWndChildAfter,
+        string? lpszClass,
+        string? lpszWindow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ChangeWindowMessageFilterEx(
+        IntPtr hWnd,
+        uint message,
+        uint action,
+        IntPtr changeFilterStruct);
 }

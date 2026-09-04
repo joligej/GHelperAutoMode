@@ -1,0 +1,16 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>GHelperAutoMode-$(InstallerVersion)-win-x64</OutputName>
+    <OutputPath>$(MSBuildThisFileDirectory)..\dist\installer\</OutputPath>
+    <DefineConstants>PublishDir=$(PublishDir);InstallerVersion=$(InstallerVersion)</DefineConstants>
+    <SuppressPdbOutput>true</SuppressPdbOutput>
+  </PropertyGroup>
+
+  <Target Name="ValidateInstallerInputs" BeforeTargets="Build">
+    <Error Condition="'$(InstallerVersion)' == ''" Text="InstallerVersion is required." />
+    <Error Condition="'$(PublishDir)' == ''" Text="PublishDir is required." />
+    <Error Condition="!Exists('$(PublishDir)\GHelperAutoMode.exe')" Text="The self-contained publish output is missing GHelperAutoMode.exe." />
+  </Target>
+</Project>

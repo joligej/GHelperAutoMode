@@ -6,7 +6,7 @@ namespace GHelperAutoMode;
 
 internal sealed class AutoModeConfig
 {
-    public int SchemaVersion { get; set; } = 7;
+    public int SchemaVersion { get; set; } = 8;
     public bool AutomationEnabled { get; set; } = true;
     public int StartupGraceSeconds { get; set; } = 12;
     public int PollIntervalMilliseconds { get; set; } = 1000;
@@ -20,6 +20,7 @@ internal sealed class AutoModeConfig
     public bool PreferSilentAtLowLoad { get; set; } = true;
     public bool StepwiseAutomaticUpshifts { get; set; }
     public KeyboardLightingConfig KeyboardLighting { get; set; } = new();
+    public TelemetryConfig Telemetry { get; set; } = new();
     public LoggingConfig Logging { get; set; } = new();
     public ThresholdConfig Thresholds { get; set; } = new();
     public List<AppRule> AppRules { get; set; } = DefaultAppRules();
@@ -39,6 +40,22 @@ internal sealed class KeyboardLightingConfig
     // Upgrades never take over lighting until the user explicitly selects a managed mode.
     public KeyboardLightingMode Mode { get; set; } = KeyboardLightingMode.Unmanaged;
     public int AccentPollIntervalSeconds { get; set; } = 5;
+    public int OwnershipHeartbeatSeconds { get; set; } = 30;
+    public int SessionRecoveryDelayMilliseconds { get; set; } = 900;
+    public int GHelperConfigReadAttempts { get; set; } = 3;
+    public int GHelperConfigReadRetryMilliseconds { get; set; } = 50;
+    public int GHelperRestartTimeoutSeconds { get; set; } = 8;
+    public int GHelperProcessPollMilliseconds { get; set; } = 100;
+    public int GHelperTaskStartAttempts { get; set; } = 3;
+    public int GHelperTaskRetryMilliseconds { get; set; } = 300;
+}
+
+internal sealed class TelemetryConfig
+{
+    public int NvidiaSmiPollIntervalSeconds { get; set; } = 4;
+    public int NvidiaSmiTimeoutSeconds { get; set; } = 2;
+    public int NvmlRecoveryIntervalSeconds { get; set; } = 60;
+    public int NvmlFailuresBeforeReset { get; set; } = 3;
 }
 
 internal sealed class LoggingConfig
@@ -136,7 +153,7 @@ internal sealed class AppRule
 
 internal sealed class ConfigService
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
 
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -187,7 +204,7 @@ internal sealed class ConfigService
             {
                 BackupPreMigrationConfig(json);
                 Save();
-                LastLoadWarning = "Your config was updated to schema 7. AutoMode will leave keyboard lighting alone until you choose a mode. A backup of the previous config is in the same folder.";
+                LastLoadWarning = "Your config was updated to schema 8. Existing choices were kept and the new advanced timing settings use their recommended defaults. A backup of the previous config is in the same folder.";
             }
 
             return Current;
@@ -210,10 +227,32 @@ internal sealed class ConfigService
 
     public void Save()
     {
-        Directory.CreateDirectory(BaseDirectory);
         Normalize(Current);
+        WriteAtomic(Current);
+    }
 
-        var json = JsonSerializer.Serialize(Current, _jsonOptions);
+    public AutoModeConfig CreateWorkingCopy() => Clone(Current);
+
+    public void ReplaceAndSave(AutoModeConfig replacement)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+        Normalize(replacement);
+        WriteAtomic(replacement);
+        Current = replacement;
+    }
+
+    private AutoModeConfig Clone(AutoModeConfig source)
+    {
+        var json = JsonSerializer.Serialize(source, _jsonOptions);
+        return JsonSerializer.Deserialize<AutoModeConfig>(json, _jsonOptions)
+               ?? throw new InvalidOperationException("The current settings could not be copied.");
+    }
+
+    private void WriteAtomic(AutoModeConfig config)
+    {
+        Directory.CreateDirectory(BaseDirectory);
+
+        var json = JsonSerializer.Serialize(config, _jsonOptions);
         var tempPath = ConfigPath + ".tmp";
 
         try
@@ -258,9 +297,13 @@ internal sealed class ConfigService
             EnsureRule(config.AppRules, "3DMark*.exe", AppRuleAction.MinimumTurbo, enabled: true);
         }
 
-        // v7 adds opt-in keyboard-lighting ownership. The property initializer supplies
+        // v7 added opt-in keyboard-lighting ownership. The property initializer supplies
         // Unmanaged when an older JSON file has no KeyboardLighting object.
         config.KeyboardLighting ??= new KeyboardLightingConfig();
+
+        // v8 exposes every user-facing policy in the Settings window. New telemetry and
+        // lighting-recovery values retain the behavior used by previous releases.
+        config.Telemetry ??= new TelemetryConfig();
 
         config.SchemaVersion = CurrentSchemaVersion;
         return true;
@@ -301,6 +344,7 @@ internal sealed class ConfigService
 
         config.Logging ??= new LoggingConfig();
         config.KeyboardLighting ??= new KeyboardLightingConfig();
+        config.Telemetry ??= new TelemetryConfig();
         config.Thresholds ??= new ThresholdConfig();
         config.AppRules ??= AutoModeConfig.DefaultAppRules();
         config.AppRules = config.AppRules.Where(rule => rule is not null).ToList();
@@ -314,6 +358,55 @@ internal sealed class ConfigService
             config.KeyboardLighting.AccentPollIntervalSeconds,
             2,
             300);
+        config.KeyboardLighting.OwnershipHeartbeatSeconds = Math.Clamp(
+            config.KeyboardLighting.OwnershipHeartbeatSeconds,
+            5,
+            3600);
+        config.KeyboardLighting.SessionRecoveryDelayMilliseconds = Math.Clamp(
+            config.KeyboardLighting.SessionRecoveryDelayMilliseconds,
+            0,
+            10_000);
+        config.KeyboardLighting.GHelperConfigReadAttempts = Math.Clamp(
+            config.KeyboardLighting.GHelperConfigReadAttempts,
+            1,
+            10);
+        config.KeyboardLighting.GHelperConfigReadRetryMilliseconds = Math.Clamp(
+            config.KeyboardLighting.GHelperConfigReadRetryMilliseconds,
+            0,
+            1000);
+        config.KeyboardLighting.GHelperRestartTimeoutSeconds = Math.Clamp(
+            config.KeyboardLighting.GHelperRestartTimeoutSeconds,
+            2,
+            30);
+        config.KeyboardLighting.GHelperProcessPollMilliseconds = Math.Clamp(
+            config.KeyboardLighting.GHelperProcessPollMilliseconds,
+            25,
+            1000);
+        config.KeyboardLighting.GHelperTaskStartAttempts = Math.Clamp(
+            config.KeyboardLighting.GHelperTaskStartAttempts,
+            1,
+            10);
+        config.KeyboardLighting.GHelperTaskRetryMilliseconds = Math.Clamp(
+            config.KeyboardLighting.GHelperTaskRetryMilliseconds,
+            0,
+            5000);
+
+        config.Telemetry.NvidiaSmiPollIntervalSeconds = Math.Clamp(
+            config.Telemetry.NvidiaSmiPollIntervalSeconds,
+            1,
+            60);
+        config.Telemetry.NvidiaSmiTimeoutSeconds = Math.Clamp(
+            config.Telemetry.NvidiaSmiTimeoutSeconds,
+            1,
+            30);
+        config.Telemetry.NvmlRecoveryIntervalSeconds = Math.Clamp(
+            config.Telemetry.NvmlRecoveryIntervalSeconds,
+            5,
+            3600);
+        config.Telemetry.NvmlFailuresBeforeReset = Math.Clamp(
+            config.Telemetry.NvmlFailuresBeforeReset,
+            1,
+            20);
 
         var t = config.Thresholds;
         t.LoadAverageSeconds = Math.Clamp(t.LoadAverageSeconds, 1, 60);
