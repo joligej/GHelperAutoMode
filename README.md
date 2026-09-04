@@ -46,21 +46,21 @@ The portable ZIP is still available. Extract it to a directory you intend to kee
 
 ### WinGet
 
-The WinGet package ID is `joligej.GHelperAutoMode`. Its community manifest is submitted after the v5 release because WinGet needs the final public download URL and SHA-256 hash.
+The WinGet package ID is `joligej.GHelperAutoMode`. The initial manifest is under review in [microsoft/winget-pkgs#429318](https://github.com/microsoft/winget-pkgs/pull/429318). The package will not appear in the default community source until Microsoft merges that pull request.
 
-Once Microsoft has merged that submission, install for the current account from a normal terminal:
-
-```powershell
-winget install --id joligej.GHelperAutoMode -e
-```
-
-Run the same command through Windows `sudo`, or from an administrator terminal, for a machine-wide installation:
+After it is merged, install for the current account from a normal terminal:
 
 ```powershell
-sudo winget install --id joligej.GHelperAutoMode -e
+winget install --id joligej.GHelperAutoMode --exact --scope user
 ```
 
-WinGet downloads the token-aware Setup executable. The package intentionally does not pretend that `--scope` can change a running process token.
+For a machine-wide installation, use an administrator terminal or Windows `sudo` and select the machine scope explicitly:
+
+```powershell
+sudo winget install --id joligej.GHelperAutoMode --exact --scope machine
+```
+
+WinGet uses the release MSI and passes its documented dual-purpose scope properties. It does not install G-Helper as a package dependency, because many working G-Helper installations are standalone and should not be duplicated. The regular Setup executable remains the simpler choice outside WinGet: there, a normal or elevated launch selects the scope from its own process token.
 
 ### Startup and uninstall
 

@@ -9,7 +9,7 @@
 - Added Start menu, Windows Installed apps, major-upgrade, repair, and uninstall integration.
 - Made MSI uninstall disable the current account's owned startup task and close the running tray process before removing files, including when the tray is running at G-Helper's higher integrity level.
 - Kept personal configuration and logs across MSI upgrades and uninstall/reinstall cycles.
-- Prepared the versioned Setup asset and package metadata for `joligej.GHelperAutoMode` in the WinGet community repository.
+- Submitted the locally tested `joligej.GHelperAutoMode` manifest to the WinGet community repository, with separate per-user and per-machine MSI scopes.
 
 ## 4.4.2 - Clearer interface and setup guidance
 

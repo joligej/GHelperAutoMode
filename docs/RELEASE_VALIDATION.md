@@ -74,6 +74,19 @@ Both uninstall routes returned 0. The running tray process stopped, installed fi
 
 These tests caught and removed an earlier design that tried to change MSI scope after initialization. Windows Installer had already selected its directories at that point, which could create a mixed-scope installation. The released MSI has no late scope-changing custom action; Setup makes the choice before invoking it.
 
+## WinGet manifest
+
+WingetCreateCLI 1.12.13.0 submitted the three-file schema 1.12 manifest as [microsoft/winget-pkgs#429318](https://github.com/microsoft/winget-pkgs/pull/429318). `winget validate --manifest` passed without warnings. The pull request remains under Microsoft review, so the package is not yet available from the default community source.
+
+The manifest points at the exact MSI listed below and exposes two scopes. Both were tested through WinGet:
+
+- a normal command running from a scheduled task with `RunLevel Limited` selected the default user entry, returned 0, and installed only under `%LOCALAPPDATA%`;
+- an elevated command with `--scope machine` returned 0 and installed only under `C:\Program Files`;
+- `winget uninstall` returned 0 for both installations and removed their files;
+- G-Helper is not declared as a package dependency, which avoids installing a second copy over a working standalone setup.
+
+The token-aware Setup executable was also evaluated as the WinGet installer. On the test machine, WinGet 1.29 waited in the Windows internet-zone ShellExecute path before creating the unsigned setup process. Direct Setup launches were unaffected. Using the MSI avoids that silent-install failure and lets WinGet handle the two scopes through its own manifest model.
+
 ## Final artifacts
 
 The exact values below are filled from the final clean build:
