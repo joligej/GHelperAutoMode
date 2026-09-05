@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.1 - Installer validation and repository layout
+
+- Flattened the single application project's source tree from `src/GHelperAutoMode` to `src` and updated release checks accordingly.
+- Removed the WinGet user installer's `elevationProhibited` declaration, which prevented Microsoft's elevated validation runner from invoking the otherwise valid per-user MSI.
+- Changed MSI product identity handling so each new build can participate in a real major upgrade while retaining the stable UpgradeCode.
+- Made release preflight derive version checks from the project and changelog instead of embedding the previous release number in the build script.
+
 ## 5.0.0 - Settings, Windows Installer, and WinGet
 
 - Added a complete settings window for load and temperature thresholds, timing, downshifts, application rules, lighting, NVIDIA telemetry, and logging.

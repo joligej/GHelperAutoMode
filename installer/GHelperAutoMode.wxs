@@ -4,7 +4,6 @@
       Manufacturer="joligej"
       Version="$(var.InstallerVersion)"
       Language="1033"
-      ProductCode="{EDFEB7D7-FF3E-4258-A9A1-B41B51B98DC3}"
       UpgradeCode="{C3E10D0F-8FBD-4C20-BDBF-9E7D0F919F1A}"
       Scope="perUserOrMachine">
 

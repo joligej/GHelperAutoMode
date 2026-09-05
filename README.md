@@ -1,5 +1,7 @@
 # GHelperAutoMode
 
+[![CI](https://github.com/joligej/GHelperAutoMode/actions/workflows/ci.yml/badge.svg)](https://github.com/joligej/GHelperAutoMode/actions/workflows/ci.yml)
+
 GHelperAutoMode is a tray companion for [G-Helper](https://github.com/seerge/g-helper). It watches sustained CPU load, NVIDIA GPU load, foreground activity, and temperatures, then asks G-Helper to use Silent, Balanced, or Turbo. Short spikes are filtered out, and every change is confirmed against G-Helper's config.
 
 It also settles a common keyboard-backlight problem: Windows Dynamic Lighting and G-Helper both trying to control the same device. Lighting management is optional and starts in **Leave lighting alone** mode.
@@ -25,7 +27,7 @@ The release builds include their .NET runtime. The .NET 10 SDK is only needed to
 
 ## Install
 
-Download the latest release from [GitHub Releases](https://github.com/joligej/GHelperAutoMode/releases/latest). For most people, `GHelperAutoMode-5.0.0-win-x64-setup.exe` is the right file.
+Download the latest release from [GitHub Releases](https://github.com/joligej/GHelperAutoMode/releases/latest). For most people, `GHelperAutoMode-5.0.1-win-x64-setup.exe` is the right file.
 
 - Open Setup normally to install for the current Windows account under `%LOCALAPPDATA%\Programs`.
 - Run the same Setup file as administrator to install for every account under `C:\Program Files`.
@@ -36,10 +38,10 @@ The raw MSI is included for managed deployments. It defaults to the current user
 
 ```powershell
 # Current user
-msiexec /i .\GHelperAutoMode-5.0.0-win-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1
+msiexec /i .\GHelperAutoMode-5.0.1-win-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1
 
 # All users; run this command from an elevated terminal
-msiexec /i .\GHelperAutoMode-5.0.0-win-x64.msi ALLUSERS=1
+msiexec /i .\GHelperAutoMode-5.0.1-win-x64.msi ALLUSERS=1
 ```
 
 The portable ZIP is still available. Extract it to a directory you intend to keep, then run `GHelperAutoMode.exe`.
@@ -176,11 +178,11 @@ Or rebuild everything in one pass:
 Installer output:
 
 ```text
-dist\installer\GHelperAutoMode-5.0.0-win-x64.msi
-dist\installer\GHelperAutoMode-5.0.0-win-x64-setup.exe
+dist\installer\GHelperAutoMode-5.0.1-win-x64.msi
+dist\installer\GHelperAutoMode-5.0.1-win-x64-setup.exe
 ```
 
-The build requires the .NET 10 SDK. WiX Toolset 6.0.2 is pinned by the installer project and restored automatically. Strict builds treat warnings as errors and run the Windows Installer ICE checks. Release files are unsigned because this project does not have a code-signing certificate; compare downloads with `SHA256SUMS.txt` before running them.
+The application has one project, so its C# files live directly under `src`. Installer code remains separate under `installer`. The build requires the .NET 10 SDK. WiX Toolset 6.0.2 is pinned by the installer project and restored automatically. Strict builds treat warnings as errors and run the Windows Installer ICE checks. Release files are unsigned because this project does not have a code-signing certificate; compare downloads with `SHA256SUMS.txt` before running them.
 
 The implementation notes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the checks recorded for the current release are in [docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md).
 

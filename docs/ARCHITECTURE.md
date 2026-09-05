@@ -4,6 +4,8 @@ This note explains the rules the code is expected to keep. It is meant for anyon
 
 ## Components
 
+The application is a single project. Its C# files live directly under `src`; the MSI and setup bootstrapper are isolated under `installer` so the main project cannot compile them accidentally.
+
 - `AutomationEngine` samples telemetry, maintains evidence timers, evaluates application rules, and selects a target performance profile.
 - `ConfigService` migrates, normalizes, copies, and atomically saves per-user configuration.
 - `SettingsForm` edits a detached working copy and validates relationships before replacing the active configuration.

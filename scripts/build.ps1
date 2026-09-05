@@ -78,7 +78,7 @@ function Test-SourceManifest {
     $sourceFiles = @(
         Get-ChildItem -LiteralPath $repoRoot -File -Force |
             Where-Object Name -ne 'SOURCE_MANIFEST.sha256'
-        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs', 'installer')) {
+        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs', 'installer', '.github')) {
             Get-ChildItem -LiteralPath (Join-Path $repoRoot $directory) -Recurse -File -Force |
                 Where-Object FullName -NotMatch '\\(?:bin|obj)\\'
         }
@@ -108,12 +108,16 @@ function Test-ReleasePreflight {
     [xml]$projectXml = Get-Content $project -Raw
     $propertyGroup = $projectXml.Project.PropertyGroup
     $projectVersion = [string]$propertyGroup.Version
+    $assemblyVersion = [string]$propertyGroup.AssemblyVersion
+    $fileVersion = [string]$propertyGroup.FileVersion
     $t = $config.Thresholds
 
     Assert-True ($config.SchemaVersion -eq 8) 'config.example.json must use schema 8.'
-    Assert-True ($projectVersion -eq '5.0.0') "project version is '$projectVersion', expected 5.0.0."
-    Assert-True ([string]$propertyGroup.AssemblyVersion -eq '5.0.0.0') 'AssemblyVersion must be 5.0.0.0.'
-    Assert-True ([string]$propertyGroup.FileVersion -eq '5.0.0.0') 'FileVersion must be 5.0.0.0.'
+    Assert-True ($projectVersion -match '^\d+\.\d+\.\d+$') "project version '$projectVersion' is not a three-part numeric version."
+    Assert-True ($assemblyVersion -eq "$projectVersion.0") "AssemblyVersion '$assemblyVersion' does not match project version '$projectVersion'."
+    Assert-True ($fileVersion -eq "$projectVersion.0") "FileVersion '$fileVersion' does not match project version '$projectVersion'."
+    $changelog = Get-Content (Join-Path $repoRoot 'CHANGELOG.md') -Raw
+    Assert-True (Test-ContainsOrdinal $changelog "## $projectVersion - ") "CHANGELOG.md has no entry for version $projectVersion."
     Assert-True ($projectXml.Project.ItemGroup.Compile.Remove -contains 'installer\**\*.cs') 'the main project must exclude installer C# sources and generated files.'
     Assert-True ($config.PollIntervalMilliseconds -ge 500) 'poll interval is below the supported floor.'
     Assert-True ([string]$config.KeyboardLighting.Mode -eq 'Unmanaged') 'example lighting mode must be opt-in (Unmanaged).'
@@ -123,7 +127,7 @@ function Test-ReleasePreflight {
     Assert-True ($config.Telemetry.NvidiaSmiTimeoutSeconds -ge 1) 'nvidia-smi timeout is below the supported floor.'
 
     $configThresholdNames = @($t.PSObject.Properties.Name | Sort-Object)
-    $configSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\AppConfig.cs') -Raw
+    $configSource = Get-Content (Join-Path $repoRoot 'src\AppConfig.cs') -Raw
     $thresholdBlock = [regex]::Match(
         $configSource,
         '(?s)internal sealed class ThresholdConfig\s*\{(?<Body>.*?)\n\}')
@@ -157,42 +161,43 @@ function Test-ReleasePreflight {
         Assert-True (($jsonNames -join '|') -eq ($sourceNames -join '|')) "config.example.json $($configParity.Label) does not exactly match $($configParity.Class)."
     }
 
-    $controllerSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\GHelperController.cs') -Raw
+    $controllerSource = Get-Content (Join-Path $repoRoot 'src\GHelperController.cs') -Raw
     $wakeGuardPosition = $controllerSource.IndexOf('if (!displayState.AllowsInputInjection())', [StringComparison]::Ordinal)
     $sendInputPosition = $controllerSource.IndexOf('var sendInput = TrySendInputHotkey', [StringComparison]::Ordinal)
     Assert-True ($wakeGuardPosition -ge 0 -and $sendInputPosition -gt $wakeGuardPosition) 'display-power input guard must precede every normal SendInput request.'
     Assert-True (Test-ContainsOrdinal $controllerSource 'TryPostDirectHotkeyToGHelperWindows') 'non-waking WM_HOTKEY route is missing.'
 
-    $lightingSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\KeyboardLightingManager.cs') -Raw
+    $lightingSource = Get-Content (Join-Path $repoRoot 'src\KeyboardLightingManager.cs') -Raw
     Assert-True (Test-ContainsOrdinal $lightingSource 'DwmGetColorizationColor') 'Windows accent-color API is missing.'
     Assert-True (Test-ContainsOrdinal $lightingSource 'skip_aura') 'G-Helper Aura ownership switch is missing.'
     Assert-True (Test-ContainsOrdinal $lightingSource 'ControlledByForegroundApp') 'foreground-app Dynamic Lighting takeover policy is missing.'
     Assert-True (Test-ContainsOrdinal $lightingSource 'forceGHelperReload: true') 'session ownership recovery must release G-Helper before Windows reacquires lighting.'
     Assert-True (-not (Test-ContainsOrdinal $lightingSource 'SendInput(')) 'keyboard lighting must never synthesize input.'
 
-    $powerSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\PowerNotificationWindow.cs') -Raw
+    $powerSource = Get-Content (Join-Path $repoRoot 'src\PowerNotificationWindow.cs') -Raw
     Assert-True (Test-ContainsOrdinal $powerSource 'WTSRegisterSessionNotification') 'session unlock/logon notification registration is missing.'
     Assert-True (Test-ContainsOrdinal $powerSource 'WtsSessionUnlock') 'session unlock ownership recovery is missing.'
 
-    $startupSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\StartupManager.cs') -Raw
+    $startupSource = Get-Content (Join-Path $repoRoot 'src\StartupManager.cs') -Raw
     Assert-True (Test-ContainsOrdinal $startupSource 'TaskLogonInteractiveToken') 'startup task must use an interactive user token.'
     Assert-True (Test-ContainsOrdinal $startupSource 'TaskRunLevelHighest') 'startup task must request HighestAvailable.'
     Assert-True (Test-ContainsOrdinal $startupSource 'RegisterTaskDefinition') 'Task Scheduler registration is missing.'
     Assert-True (-not (Test-ContainsOrdinal $startupSource 'key.SetValue(ValueName')) 'startup must not be registered through HKCU Run.'
 
-    $programSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\Program.cs') -Raw
+    $programSource = Get-Content (Join-Path $repoRoot 'src\Program.cs') -Raw
     Assert-True (Test-ContainsOrdinal $programSource '--prepare-uninstall') 'MSI uninstall preparation command is missing.'
     Assert-True (Test-ContainsOrdinal $programSource 'ExitEventPrefix') 'cross-session uninstall shutdown event is missing.'
     Assert-True (Test-ContainsOrdinal $programSource 'FindInstalledInstances') 'targeted uninstall process discovery is missing.'
     Assert-True (Test-ContainsOrdinal $programSource 'instance.Kill(entireProcessTree: false)') 'targeted uninstall fallback is missing.'
 
-    $powerWindowSource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\PowerNotificationWindow.cs') -Raw
+    $powerWindowSource = Get-Content (Join-Path $repoRoot 'src\PowerNotificationWindow.cs') -Raw
     Assert-True (Test-ContainsOrdinal $powerWindowSource 'ChangeWindowMessageFilterEx') 'cross-integrity uninstall shutdown message filter is missing.'
     Assert-True (Test-ContainsOrdinal $powerWindowSource 'TryRequestExit') 'cross-integrity uninstall shutdown request is missing.'
 
     $installerSource = Get-Content (Join-Path $repoRoot 'installer\GHelperAutoMode.wxs') -Raw
     Assert-True (Test-ContainsOrdinal $installerSource 'Scope="perUserOrMachine"') 'MSI must remain a dual-purpose package.'
-    Assert-True (Test-ContainsOrdinal $installerSource 'ProductCode="{EDFEB7D7-FF3E-4258-A9A1-B41B51B98DC3}"') 'v5 MSI ProductCode must remain stable for WinGet detection and reproducible builds.'
+    Assert-True (Test-ContainsOrdinal $installerSource 'UpgradeCode="{C3E10D0F-8FBD-4C20-BDBF-9E7D0F919F1A}"') 'MSI UpgradeCode must remain stable across releases.'
+    Assert-True (-not (Test-ContainsOrdinal $installerSource 'ProductCode=')) 'MSI ProductCode must be generated per build so version upgrades are major upgrades.'
     Assert-True (Test-ContainsOrdinal $installerSource 'Id="ARPINSTALLLOCATION"') 'MSI install-location registration is missing.'
     Assert-True (Test-ContainsOrdinal $installerSource '<MajorUpgrade') 'MSI major-upgrade handling is missing.'
     Assert-True (Test-ContainsOrdinal $installerSource 'ExeCommand="--prepare-uninstall"') 'MSI uninstall cleanup action is missing.'
@@ -203,7 +208,7 @@ function Test-ReleasePreflight {
     Assert-True ((Test-ContainsOrdinal $setupSource 'ALLUSERS=2') -and
         (Test-ContainsOrdinal $setupSource 'MSIINSTALLPERUSER=1')) 'setup per-user MSI selection is missing.'
 
-    $integritySource = Get-Content (Join-Path $repoRoot 'src\GHelperAutoMode\ProcessIntegrity.cs') -Raw
+    $integritySource = Get-Content (Join-Path $repoRoot 'src\ProcessIntegrity.cs') -Raw
     Assert-True (Test-ContainsOrdinal $integritySource 'TokenIntegrityLevel') 'process-integrity comparison is missing.'
 
     Assert-True ($t.BalancedCpuResetPercent -lt $t.BalancedCpuPercent) 'Balanced CPU reset must be below its enter threshold.'
