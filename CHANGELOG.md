@@ -1,5 +1,24 @@
 # Changelog
 
+## 5.0.3 - Analyzer review and resource cleanup
+
+- Reviewed all 169 findings from the full .NET analyzer set. Fixed 148 and documented the English-only interface and seven top-level error boundaries.
+- Enabled the full analyzer set, code-style checks, and warnings-as-errors for normal builds and CI.
+- Restricted Windows DLL imports to System32 and made UI-thread continuation choices explicit.
+- Added complete tray and settings disposal, partial-construction cleanup, and a SafeHandle for Windows power notifications.
+- Limited recoverable catches to their expected error types and bounded cleanup of timed-out NVIDIA CLI queries.
+- Preserve the original settings file after access errors. Invalid JSON is replaced only after its recovery copy is written successfully.
+- Added repeatable regression checks for settings persistence, UI-resource disposal, telemetry failure and resume, supervisor retries, and normal exit.
+- Added a product privacy policy describing foreground-process observations, local storage, logging, retention, and deletion.
+
+## 5.0.2 - GPU telemetry crash recovery and elevated startup
+
+- Moved native NVIDIA telemetry into a persistent worker process. A driver access violation or timeout switches AutoMode to nvidia-smi for the rest of the session.
+- Added three one-minute restart attempts to the login task and migrate existing enabled tasks when their recovery settings are missing.
+- Added a waiting parent process for tray crash recovery. Normal tray exits stop it, while abnormal exits get up to three retries and a single local recovery-status file.
+- Reuse the existing elevated login task when a manual launch needs G-Helper's integrity level.
+- Preserve elevation when lighting recovery has to start G-Helper directly.
+
 ## 5.0.1 - Installer validation and repository layout
 
 - Flattened the single application project's source tree from `src/GHelperAutoMode` to `src` and updated release checks accordingly.

@@ -78,7 +78,7 @@ function Test-SourceManifest {
     $sourceFiles = @(
         Get-ChildItem -LiteralPath $repoRoot -File -Force |
             Where-Object Name -ne 'SOURCE_MANIFEST.sha256'
-        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs', 'installer', '.github')) {
+        foreach ($directory in @('src', 'assets', 'scripts', 'examples', 'docs', 'installer', 'tests', '.github')) {
             Get-ChildItem -LiteralPath (Join-Path $repoRoot $directory) -Recurse -File -Force |
                 Where-Object FullName -NotMatch '\\(?:bin|obj)\\'
         }
@@ -96,7 +96,7 @@ function Test-SourceManifest {
 function Test-ReleasePreflight {
     foreach ($required in @(
         'GHelperAutoMode.csproj', 'examples\config.example.json', 'assets\automode.ico',
-        'README.md', 'CHANGELOG.md', 'docs\ARCHITECTURE.md', 'docs\RELEASE_VALIDATION.md',
+        'README.md', 'CHANGELOG.md', 'PRIVACY.md', 'docs\ARCHITECTURE.md', 'docs\RELEASE_VALIDATION.md',
         'SOURCE_MANIFEST.sha256', 'scripts\build-installer.ps1',
         'installer\GHelperAutoMode.Installer.wixproj', 'installer\GHelperAutoMode.wxs',
         'installer\bootstrapper\GHelperAutoMode.Setup.csproj', 'installer\bootstrapper\Program.cs'
@@ -118,7 +118,13 @@ function Test-ReleasePreflight {
     Assert-True ($fileVersion -eq "$projectVersion.0") "FileVersion '$fileVersion' does not match project version '$projectVersion'."
     $changelog = Get-Content (Join-Path $repoRoot 'CHANGELOG.md') -Raw
     Assert-True (Test-ContainsOrdinal $changelog "## $projectVersion - ") "CHANGELOG.md has no entry for version $projectVersion."
-    Assert-True ($projectXml.Project.ItemGroup.Compile.Remove -contains 'installer\**\*.cs') 'the main project must exclude installer C# sources and generated files.'
+    $compileExclusions = @($projectXml.SelectNodes('/Project/ItemGroup/Compile[@Remove]') |
+        ForEach-Object { $_.GetAttribute('Remove') })
+    Assert-True ($compileExclusions -contains 'installer\**\*.cs') 'the main project must exclude installer C# sources and generated files.'
+    Assert-True ($compileExclusions -contains 'tests\**\*.cs') 'the main project must exclude regression-test C# sources.'
+    Assert-True ([string]$projectXml.Project.PropertyGroup.AnalysisMode -eq 'All') 'all .NET analyzers must remain enabled.'
+    Assert-True ([string]$projectXml.Project.PropertyGroup.EnforceCodeStyleInBuild -eq 'true') 'code-style enforcement must remain enabled.'
+    Assert-True ([string]$projectXml.Project.PropertyGroup.TreatWarningsAsErrors -eq 'true') 'normal builds must treat warnings as errors.'
     Assert-True ($config.PollIntervalMilliseconds -ge 500) 'poll interval is below the supported floor.'
     Assert-True ([string]$config.KeyboardLighting.Mode -eq 'Unmanaged') 'example lighting mode must be opt-in (Unmanaged).'
     Assert-True ($config.KeyboardLighting.AccentPollIntervalSeconds -ge 2) 'accent poll interval is below the supported floor.'
@@ -307,7 +313,7 @@ if (-not (Test-Path $exe -PathType Leaf)) {
 }
 
 foreach ($required in @(
-    'README.md', 'CHANGELOG.md', 'SOURCE_MANIFEST.sha256',
+    'README.md', 'CHANGELOG.md', 'PRIVACY.md', 'SOURCE_MANIFEST.sha256',
     'examples\config.example.json', 'docs\ARCHITECTURE.md', 'docs\RELEASE_VALIDATION.md'
 )) {
     $published = Join-Path $outDir $required

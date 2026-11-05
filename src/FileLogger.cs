@@ -34,7 +34,7 @@ internal sealed class FileLogger
                     LogPath,
                     $"{timestamp} [{level}] {message}{Environment.NewLine}");
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Logging must never break automation.
             }

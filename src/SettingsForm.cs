@@ -6,6 +6,7 @@ namespace GHelperAutoMode;
 
 internal sealed class SettingsForm : Form
 {
+    private Icon? _windowIcon;
     private sealed class SettingsPage
     {
         public required TableLayoutPanel Grid { get; init; }
@@ -37,8 +38,15 @@ internal sealed class SettingsForm : Form
         ShowInTaskbar = true;
         FormBorderStyle = FormBorderStyle.Sizable;
 
-        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
-        catch { /* The window remains usable without a custom icon. */ }
+        try
+        {
+            _windowIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            Icon = _windowIcon;
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception or IOException)
+        {
+            // The settings window can open without an associated application icon.
+        }
 
         var tabs = new TabControl
         {
@@ -627,7 +635,7 @@ internal sealed class SettingsForm : Form
             DialogResult = DialogResult.OK;
             Close();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or FormatException or ArgumentException)
         {
             MessageBox.Show(
                 this,
@@ -697,6 +705,17 @@ internal sealed class SettingsForm : Form
         return true;
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _rulesGrid?.Dispose();
+            _windowIcon?.Dispose();
+            _windowIcon = null;
+        }
+        base.Dispose(disposing);
+    }
+
     private void OpenDataFolder()
     {
         try
@@ -707,7 +726,7 @@ internal sealed class SettingsForm : Form
                 UseShellExecute = true
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             MessageBox.Show(this, ex.Message, "Could not open the data folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }

@@ -16,6 +16,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly GHelperController _gHelper;
     private readonly KeyboardLightingManager _lightingManager;
     private readonly NotifyIcon _notifyIcon;
+    private readonly ContextMenuStrip _menu;
+    private bool _disposed;
     private Icon? _trayIconImage;
     private ControlState? _lastIconControlState;
     private PerformanceMode? _lastIconMode;
@@ -40,197 +42,202 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private EngineStatus? _lastStatus;
     private bool _updatingUi;
 
-    public TrayApplicationContext()
+    public TrayApplicationContext(ConfigService? configService = null)
     {
-        _ = _dispatcher.Handle;
-        _configService = new ConfigService();
-        _logger = new FileLogger(_configService);
-        _powerWindow = new PowerNotificationWindow();
-        _powerWindow.ExitRequested += RequestExit;
-        _gHelper = new GHelperController();
-        _lightingManager = new KeyboardLightingManager(_configService, _logger, _gHelper);
-
-        if (!_powerWindow.DisplayNotificationRegistered)
+        try
         {
-            _logger.Warn(
-                $"Windows display power notifications could not be registered (Win32 error {_powerWindow.DisplayRegistrationError}); "
-                + "display-off automation will remain disabled/conservative until registration succeeds after a restart.");
-        }
-        if (!_powerWindow.SessionNotificationRegistered)
-        {
-            _logger.Warn(
-                $"Windows session notifications could not be registered (Win32 error {_powerWindow.SessionRegistrationError}); "
-                + "AutoMode will still check Dynamic Lighting control regularly.");
-        }
+            _ = _dispatcher.Handle;
+            _configService = configService ?? new ConfigService();
+            _logger = new FileLogger(_configService);
+            _powerWindow = new PowerNotificationWindow();
+            _powerWindow.ExitRequested += RequestExit;
+            _gHelper = new GHelperController();
+            _lightingManager = new KeyboardLightingManager(_configService, _logger, _gHelper);
 
-        var cpu = new CpuMonitor();
-        var cpuTemperature = new AsusCpuTemperatureMonitor();
-        var gpu = new NvidiaGpuMonitor();
-        _engine = new AutomationEngine(_configService, _logger, cpu, cpuTemperature, gpu, _gHelper);
+            if (!_powerWindow.DisplayNotificationRegistered)
+            {
+                _logger.Warn(
+                    $"Windows display power notifications could not be registered (Win32 error {_powerWindow.DisplayRegistrationError}); "
+                    + "display-off automation will remain disabled/conservative until registration succeeds after a restart.");
+            }
+            if (!_powerWindow.SessionNotificationRegistered)
+            {
+                _logger.Warn(
+                    $"Windows session notifications could not be registered (Win32 error {_powerWindow.SessionRegistrationError}); "
+                    + "AutoMode will still check Dynamic Lighting control regularly.");
+            }
 
-        _autoItem = MakeControlItem("Auto", ControlState.Auto);
-        _silentItem = MakeControlItem("Force Silent", ControlState.ForceSilent);
-        _balancedItem = MakeControlItem("Force Balanced", ControlState.ForceBalanced);
-        _turboItem = MakeControlItem("Force Turbo", ControlState.ForceTurbo);
-        _pauseItem = MakeControlItem("Pause automation", ControlState.Pause);
+            var cpu = new CpuMonitor();
+            var cpuTemperature = new AsusCpuTemperatureMonitor();
+            var gpu = new NvidiaGpuMonitor();
+            _engine = new AutomationEngine(_configService, _logger, cpu, cpuTemperature, gpu, _gHelper);
 
-        _preferSilentItem = new ToolStripMenuItem("Use Silent at low load")
-        {
-            Checked = _configService.Current.PreferSilentAtLowLoad,
-            CheckOnClick = true
-        };
-        _preferSilentItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
-            _preferSilentItem,
-            value => _configService.Current.PreferSilentAtLowLoad = value,
-            "Use Silent at low load");
+            _autoItem = MakeControlItem("Auto", ControlState.Auto);
+            _silentItem = MakeControlItem("Force Silent", ControlState.ForceSilent);
+            _balancedItem = MakeControlItem("Force Balanced", ControlState.ForceBalanced);
+            _turboItem = MakeControlItem("Force Turbo", ControlState.ForceTurbo);
+            _pauseItem = MakeControlItem("Pause automation", ControlState.Pause);
 
-        _stepwiseUpshiftItem = new ToolStripMenuItem("Pass through Balanced before Turbo")
-        {
-            Checked = _configService.Current.StepwiseAutomaticUpshifts,
-            CheckOnClick = true
-        };
-        _stepwiseUpshiftItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
-            _stepwiseUpshiftItem,
-            value => _configService.Current.StepwiseAutomaticUpshifts = value,
-            "Pass through Balanced before Turbo");
+            _preferSilentItem = new ToolStripMenuItem("Use Silent at low load")
+            {
+                Checked = _configService.Current.PreferSilentAtLowLoad,
+                CheckOnClick = true
+            };
+            _preferSilentItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
+                _preferSilentItem,
+                value => _configService.Current.PreferSilentAtLowLoad = value,
+                "Use Silent at low load");
 
-        var adaptiveMenu = new ToolStripMenuItem("Automatic switching");
-        adaptiveMenu.DropDownItems.Add(_preferSilentItem);
-        adaptiveMenu.DropDownItems.Add(_stepwiseUpshiftItem);
+            _stepwiseUpshiftItem = new ToolStripMenuItem("Pass through Balanced before Turbo")
+            {
+                Checked = _configService.Current.StepwiseAutomaticUpshifts,
+                CheckOnClick = true
+            };
+            _stepwiseUpshiftItem.CheckedChanged += (_, _) => ToggleAdaptiveOption(
+                _stepwiseUpshiftItem,
+                value => _configService.Current.StepwiseAutomaticUpshifts = value,
+                "Pass through Balanced before Turbo");
 
-        _lightingUnmanagedItem = MakeLightingItem(
-            "Leave lighting alone",
-            KeyboardLightingMode.Unmanaged);
-        _lightingDynamicItem = MakeLightingItem(
-            "Windows controls lighting",
-            KeyboardLightingMode.WindowsDynamicLighting);
-        _lightingAccentItem = MakeLightingItem(
-            "G-Helper uses the Windows accent color",
-            KeyboardLightingMode.GHelperWindowsAccent);
-        _lightingManualItem = MakeLightingItem(
-            "G-Helper keeps its current Aura settings",
-            KeyboardLightingMode.GHelperManual);
-        _lightingStatusItem = new ToolStripMenuItem("Status: starting...")
-        {
-            Enabled = false
-        };
+            var adaptiveMenu = new ToolStripMenuItem("Automatic switching");
+            adaptiveMenu.DropDownItems.Add(_preferSilentItem);
+            adaptiveMenu.DropDownItems.Add(_stepwiseUpshiftItem);
 
-        var openDynamicLightingSettingsItem = new ToolStripMenuItem("Open Windows Dynamic Lighting settings...");
-        openDynamicLightingSettingsItem.Click += (_, _) => OpenPath("ms-settings:personalization-lighting");
+            _lightingUnmanagedItem = MakeLightingItem(
+                "Leave lighting alone",
+                KeyboardLightingMode.Unmanaged);
+            _lightingDynamicItem = MakeLightingItem(
+                "Windows controls lighting",
+                KeyboardLightingMode.WindowsDynamicLighting);
+            _lightingAccentItem = MakeLightingItem(
+                "G-Helper uses the Windows accent color",
+                KeyboardLightingMode.GHelperWindowsAccent);
+            _lightingManualItem = MakeLightingItem(
+                "G-Helper keeps its current Aura settings",
+                KeyboardLightingMode.GHelperManual);
+            _lightingStatusItem = new ToolStripMenuItem("Status: starting...")
+            {
+                Enabled = false
+            };
 
-        var reapplyLightingOwnershipItem = new ToolStripMenuItem("Apply this lighting choice again");
-        reapplyLightingOwnershipItem.Click += async (_, _) => await ReapplyLightingOwnershipAsync();
-
-        _lightingMenu = new ToolStripMenuItem("Keyboard lighting");
-        _lightingMenu.DropDownItems.AddRange([
-            _lightingUnmanagedItem,
+            _lightingMenu = new ToolStripMenuItem("Keyboard lighting");
+            _lightingMenu.DropDownItems.AddRange([
+                _lightingUnmanagedItem,
             _lightingDynamicItem,
             _lightingAccentItem,
-            _lightingManualItem,
-            new ToolStripSeparator(),
-            reapplyLightingOwnershipItem,
-            _lightingStatusItem,
-            openDynamicLightingSettingsItem
-        ]);
-        UpdateLightingChecks(_configService.Current.KeyboardLighting.Mode);
-        UpdateLightingStatus();
+            _lightingManualItem
+            ]);
+            _lightingMenu.DropDownItems.Add(new ToolStripSeparator());
+            var reapplyLightingOwnershipItem = _lightingMenu.DropDownItems.Add("Apply this lighting choice again");
+            reapplyLightingOwnershipItem.Click += async (_, _) => await ReapplyLightingOwnershipAsync().ConfigureAwait(true);
+            _lightingMenu.DropDownItems.Add(_lightingStatusItem);
+            var openDynamicLightingSettingsItem = _lightingMenu.DropDownItems.Add("Open Windows Dynamic Lighting settings...");
+            openDynamicLightingSettingsItem.Click += (_, _) => OpenPath("ms-settings:personalization-lighting");
+            UpdateLightingChecks(_configService.Current.KeyboardLighting.Mode);
+            UpdateLightingStatus();
 
-        _loggingItem = new ToolStripMenuItem("Save logs")
+            _loggingItem = new ToolStripMenuItem("Save logs")
+            {
+                Checked = _configService.Current.Logging.Enabled,
+                CheckOnClick = true
+            };
+            _loggingItem.CheckedChanged += (_, _) => ToggleLogging();
+
+            _startupItem = new ToolStripMenuItem("Run at Windows login (Task Scheduler)")
+            {
+                Checked = StartupManager.IsEnabled(),
+                CheckOnClick = true
+            };
+            _startupItem.CheckedChanged += (_, _) => ToggleStartup();
+
+            _statusItem = new ToolStripMenuItem("Starting...");
+            _statusItem.Click += (_, _) => ShowDiagnostics();
+
+            var settingsItem = new ToolStripMenuItem("Settings...");
+            settingsItem.Click += (_, _) => ShowSettings();
+
+            var diagnosticsItem = new ToolStripMenuItem("Show diagnostics...");
+            diagnosticsItem.Click += (_, _) => ShowDiagnostics();
+
+            var copyDiagnosticsItem = new ToolStripMenuItem("Copy diagnostics");
+            copyDiagnosticsItem.Click += (_, _) => CopyDiagnostics();
+
+            var openConfigItem = new ToolStripMenuItem("Open AutoMode config");
+            openConfigItem.Click += (_, _) => OpenPath(_configService.ConfigPath);
+
+            var openGHelperConfigItem = new ToolStripMenuItem("Open G-Helper config");
+            openGHelperConfigItem.Click += (_, _) => OpenPath(_gHelper.ConfigPath);
+
+            var openLogsItem = new ToolStripMenuItem("Open log folder");
+            openLogsItem.Click += (_, _) => OpenPath(_configService.LogDirectory);
+
+            var reloadItem = new ToolStripMenuItem("Reload config");
+            reloadItem.Click += (_, _) => ReloadConfig();
+
+            var exitItem = new ToolStripMenuItem("Exit");
+            exitItem.Click += (_, _) => ExitThread();
+
+            _menu = new ContextMenuStrip();
+            var menu = _menu;
+            menu.Items.Add(_statusItem);
+            menu.Items.Add(settingsItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.AddRange([_autoItem, _silentItem, _balancedItem, _turboItem, _pauseItem]);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(adaptiveMenu);
+            menu.Items.Add(_lightingMenu);
+            menu.Items.Add(_loggingItem);
+            menu.Items.Add(_startupItem);
+            menu.Items.Add(reloadItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(diagnosticsItem);
+            menu.Items.Add(copyDiagnosticsItem);
+            menu.Items.Add(openConfigItem);
+            menu.Items.Add(openGHelperConfigItem);
+            menu.Items.Add(openLogsItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(exitItem);
+
+            _trayIconImage = TrayIconFactory.Create(ControlState.Auto, _engine.CurrentMode);
+            _lastIconControlState = ControlState.Auto;
+            _lastIconMode = _engine.CurrentMode;
+            _notifyIcon = new NotifyIcon
+            {
+                Icon = _trayIconImage,
+                Text = "G-Helper Auto Mode",
+                ContextMenuStrip = menu,
+                Visible = true
+            };
+            _notifyIcon.DoubleClick += (_, _) => ShowSettings();
+
+            _powerWindow.DisplayStateChanged += _engine.SetDisplayState;
+            _powerWindow.Resumed += _engine.ResetAfterResume;
+            _powerWindow.Resumed += PowerWindowOnResumeForLighting;
+            _powerWindow.SessionReady += PowerWindowOnSessionReady;
+            _engine.ModeChanged += EngineOnModeChanged;
+            _engine.StatusUpdated += EngineOnStatusUpdated;
+            _lightingManager.StatusChanged += LightingManagerOnStatusChanged;
+
+            UpdateControlChecks(ControlState.Auto);
+            _engine.Start();
+            _lightingManager.Start();
+
+            if (!string.IsNullOrWhiteSpace(_configService.LastLoadWarning))
+                ShowConfigWarning(_configService.LastLoadWarning);
+
+            if (!string.IsNullOrWhiteSpace(StartupManager.LastMaintenanceWarning))
+            {
+                _logger.Warn(StartupManager.LastMaintenanceWarning);
+                MessageBox.Show(
+                    StartupManager.LastMaintenanceWarning,
+                    "G-Helper Auto Mode startup",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+        catch
         {
-            Checked = _configService.Current.Logging.Enabled,
-            CheckOnClick = true
-        };
-        _loggingItem.CheckedChanged += (_, _) => ToggleLogging();
-
-        _startupItem = new ToolStripMenuItem("Run at Windows login (Task Scheduler)")
-        {
-            Checked = StartupManager.IsEnabled(),
-            CheckOnClick = true
-        };
-        _startupItem.CheckedChanged += (_, _) => ToggleStartup();
-
-        _statusItem = new ToolStripMenuItem("Starting...");
-        _statusItem.Click += (_, _) => ShowDiagnostics();
-
-        var settingsItem = new ToolStripMenuItem("Settings...");
-        settingsItem.Click += (_, _) => ShowSettings();
-
-        var diagnosticsItem = new ToolStripMenuItem("Show diagnostics...");
-        diagnosticsItem.Click += (_, _) => ShowDiagnostics();
-
-        var copyDiagnosticsItem = new ToolStripMenuItem("Copy diagnostics");
-        copyDiagnosticsItem.Click += (_, _) => CopyDiagnostics();
-
-        var openConfigItem = new ToolStripMenuItem("Open AutoMode config");
-        openConfigItem.Click += (_, _) => OpenPath(_configService.ConfigPath);
-
-        var openGHelperConfigItem = new ToolStripMenuItem("Open G-Helper config");
-        openGHelperConfigItem.Click += (_, _) => OpenPath(_gHelper.ConfigPath);
-
-        var openLogsItem = new ToolStripMenuItem("Open log folder");
-        openLogsItem.Click += (_, _) => OpenPath(_configService.LogDirectory);
-
-        var reloadItem = new ToolStripMenuItem("Reload config");
-        reloadItem.Click += (_, _) => ReloadConfig();
-
-        var exitItem = new ToolStripMenuItem("Exit");
-        exitItem.Click += (_, _) => ExitThread();
-
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(_statusItem);
-        menu.Items.Add(settingsItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.AddRange([_autoItem, _silentItem, _balancedItem, _turboItem, _pauseItem]);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(adaptiveMenu);
-        menu.Items.Add(_lightingMenu);
-        menu.Items.Add(_loggingItem);
-        menu.Items.Add(_startupItem);
-        menu.Items.Add(reloadItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(diagnosticsItem);
-        menu.Items.Add(copyDiagnosticsItem);
-        menu.Items.Add(openConfigItem);
-        menu.Items.Add(openGHelperConfigItem);
-        menu.Items.Add(openLogsItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(exitItem);
-
-        _trayIconImage = TrayIconFactory.Create(ControlState.Auto, _engine.CurrentMode);
-        _lastIconControlState = ControlState.Auto;
-        _lastIconMode = _engine.CurrentMode;
-        _notifyIcon = new NotifyIcon
-        {
-            Icon = _trayIconImage,
-            Text = "G-Helper Auto Mode",
-            ContextMenuStrip = menu,
-            Visible = true
-        };
-        _notifyIcon.DoubleClick += (_, _) => ShowSettings();
-
-        _powerWindow.DisplayStateChanged += _engine.SetDisplayState;
-        _powerWindow.Resumed += _engine.ResetAfterResume;
-        _powerWindow.Resumed += PowerWindowOnResumeForLighting;
-        _powerWindow.SessionReady += PowerWindowOnSessionReady;
-        _engine.ModeChanged += EngineOnModeChanged;
-        _engine.StatusUpdated += EngineOnStatusUpdated;
-        _lightingManager.StatusChanged += LightingManagerOnStatusChanged;
-
-        UpdateControlChecks(ControlState.Auto);
-        _engine.Start();
-        _lightingManager.Start();
-
-        if (!string.IsNullOrWhiteSpace(_configService.LastLoadWarning))
-            ShowConfigWarning(_configService.LastLoadWarning);
-
-        if (!string.IsNullOrWhiteSpace(StartupManager.LastMaintenanceWarning))
-        {
-            _logger.Warn(StartupManager.LastMaintenanceWarning);
-            MessageBox.Show(
-                StartupManager.LastMaintenanceWarning,
-                "G-Helper Auto Mode startup",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            Dispose();
+            throw;
         }
     }
 
@@ -267,7 +274,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem MakeLightingItem(string text, KeyboardLightingMode mode)
     {
         var item = new ToolStripMenuItem(text);
-        item.Click += async (_, _) => await SetKeyboardLightingModeAsync(mode);
+        item.Click += async (_, _) => await SetKeyboardLightingModeAsync(mode).ConfigureAwait(true);
         return item;
     }
 
@@ -300,7 +307,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _configService.Save();
             UpdateLightingChecks(mode);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             _configService.Current.KeyboardLighting.Mode = previous;
             UpdateLightingChecks(previous);
@@ -319,7 +326,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 "tray selection",
                 forceGHelperReload: mode != KeyboardLightingMode.Unmanaged &&
                                     (mode != previous || mode == KeyboardLightingMode.WindowsDynamicLighting),
-                forceOwnershipRefresh: mode == KeyboardLightingMode.WindowsDynamicLighting);
+                forceOwnershipRefresh: mode == KeyboardLightingMode.WindowsDynamicLighting).ConfigureAwait(true);
 
             if (!result.Success)
             {
@@ -356,7 +363,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             var result = await _lightingManager.ApplyNowAsync(
                 "manual lighting retry",
                 forceGHelperReload: mode != KeyboardLightingMode.Unmanaged,
-                forceOwnershipRefresh: mode == KeyboardLightingMode.WindowsDynamicLighting);
+                forceOwnershipRefresh: mode == KeyboardLightingMode.WindowsDynamicLighting).ConfigureAwait(true);
 
             if (!result.Success)
             {
@@ -419,7 +426,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _engine.ReloadConfig();
             _logger.Info($"{name} -> {requested}.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             _configService.Load();
             _updatingUi = true;
@@ -478,7 +485,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (enabled)
                 _logger.Info("Log saving enabled from tray menu.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             _configService.Current.Logging.Enabled = previous;
             _updatingUi = true;
@@ -504,7 +511,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             var status = StartupManager.GetStatus();
             _logger.Info($"Windows-login startup changed: {status.Summary}. {status.Detail}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
             _updatingUi = true;
             _startupItem.Checked = StartupManager.IsEnabled();
@@ -584,7 +591,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Clipboard.SetText(BuildDiagnostics());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
         {
             MessageBox.Show(
                 $"Could not copy diagnostics:\n\n{ex.Message}",
@@ -789,7 +796,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 UseShellExecute = true
             });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             MessageBox.Show(
                 $"Could not open:\n{path}\n\n{ex.Message}",
@@ -801,22 +808,59 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _logger.Info("Exiting.");
-        _notifyIcon.Visible = false;
-        _powerWindow.DisplayStateChanged -= _engine.SetDisplayState;
-        _powerWindow.Resumed -= _engine.ResetAfterResume;
-        _powerWindow.Resumed -= PowerWindowOnResumeForLighting;
-        _powerWindow.SessionReady -= PowerWindowOnSessionReady;
-        _powerWindow.ExitRequested -= RequestExit;
-        _engine.ModeChanged -= EngineOnModeChanged;
-        _engine.StatusUpdated -= EngineOnStatusUpdated;
-        _lightingManager.StatusChanged -= LightingManagerOnStatusChanged;
-        _notifyIcon.Dispose();
-        _trayIconImage?.Dispose();
-        _lightingManager.Dispose();
-        _engine.Dispose();
-        _powerWindow.Dispose();
-        _dispatcher.Dispose();
+        Dispose();
         base.ExitThreadCore();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !_disposed)
+        {
+            _disposed = true;
+            _logger?.Info("Exiting.");
+            if (_notifyIcon is not null)
+                _notifyIcon.Visible = false;
+            if (_powerWindow is not null && _engine is not null)
+            {
+                _powerWindow.DisplayStateChanged -= _engine.SetDisplayState;
+                _powerWindow.Resumed -= _engine.ResetAfterResume;
+                _powerWindow.Resumed -= PowerWindowOnResumeForLighting;
+                _powerWindow.SessionReady -= PowerWindowOnSessionReady;
+                _powerWindow.ExitRequested -= RequestExit;
+            }
+            if (_engine is not null)
+            {
+                _engine.ModeChanged -= EngineOnModeChanged;
+                _engine.StatusUpdated -= EngineOnStatusUpdated;
+            }
+            if (_lightingManager is not null)
+                _lightingManager.StatusChanged -= LightingManagerOnStatusChanged;
+            _notifyIcon?.Dispose();
+            _trayIconImage?.Dispose();
+            _trayIconImage = null;
+            _lightingManager?.Dispose();
+            _engine?.Dispose();
+            _powerWindow?.Dispose();
+            // Dispose field-owned items even when construction stopped before menu attachment.
+            _autoItem?.Dispose();
+            _silentItem?.Dispose();
+            _balancedItem?.Dispose();
+            _turboItem?.Dispose();
+            _pauseItem?.Dispose();
+            _loggingItem?.Dispose();
+            _startupItem?.Dispose();
+            _preferSilentItem?.Dispose();
+            _stepwiseUpshiftItem?.Dispose();
+            _lightingUnmanagedItem?.Dispose();
+            _lightingDynamicItem?.Dispose();
+            _lightingAccentItem?.Dispose();
+            _lightingManualItem?.Dispose();
+            _lightingStatusItem?.Dispose();
+            _lightingMenu?.Dispose();
+            _statusItem?.Dispose();
+            _menu?.Dispose();
+            _dispatcher.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

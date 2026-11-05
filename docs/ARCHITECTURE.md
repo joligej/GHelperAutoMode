@@ -6,12 +6,19 @@ This note explains the rules the code is expected to keep. It is meant for anyon
 
 The application is a single project. Its C# files live directly under `src`; the MSI and setup bootstrapper are isolated under `installer` so the main project cannot compile them accidentally.
 
+The regression executable lives under `tests` and is also excluded from the application's compile items. It supplies isolated configuration directories and worker responses, keeping the normal suite independent of NVIDIA hardware.
+
+The tray owns its dispatcher, menu items, context menu, notification icon, engine, lighting manager, and power window. `Dispose(bool)` releases those fields on normal exit, explicit disposal, and failed construction. The power-notification registration has its own SafeHandle. Settings disposes its owned grid and extracted icon before the form's base cleanup.
+
+Async automation and lighting transitions explicitly resume on the WinForms context so timer state, evidence epochs, resume handling, and controls stay serialized. The pipe client has no UI state and uses `ConfigureAwait(false)` for its I/O.
+
 - `AutomationEngine` samples telemetry, maintains evidence timers, evaluates application rules, and selects a target performance profile.
 - `ConfigService` migrates, normalizes, copies, and atomically saves per-user configuration.
 - `SettingsForm` edits a detached working copy and validates relationships before replacing the active configuration.
 - `GHelperController` sends and confirms profile requests through G-Helper.
 - `KeyboardLightingManager` keeps the selected lighting owner in place, separately from performance-profile decisions.
 - `StartupManager` owns the per-user Task Scheduler entry and legacy-startup migration.
+- `StartupSupervisor` waits for the tray process and restarts it after abnormal exit, up to three times with a one-minute delay. A zero exit code ends supervision. The scheduler owns the supervisor's lifetime, and the tray owns its separate native telemetry worker.
 - `PowerNotificationWindow` receives display, resume, session, and uninstall-shutdown messages.
 - `GHelperAutoMode.Setup` embeds the MSI and chooses its scope from the launcher's actual elevation token before Windows Installer starts.
 
@@ -37,6 +44,8 @@ GPU telemetry has four quality levels:
 CPU-temperature decisions require current, reliable data. The configured grace period avoids brief provider gaps but does not turn stale data into decision evidence.
 
 NVML recovery and `nvidia-smi` fallback cadence are configuration values. A settings reload changes them without replacing the telemetry provider. Windows and NVML API identifiers remain implementation constants because they are protocol definitions rather than policy.
+
+Native NVML calls run in a persistent child process, started with `--nvml-worker`. The tray requests one JSON sample over redirected standard streams per tick. Worker exit or timeout disables NVML for that session and sampling continues through `nvidia-smi`. Closing the request pipe ends the worker when its parent exits. Resume disposes the worker and invalidates outstanding samples through the provider generation check.
 
 ### Foreground-process identity
 

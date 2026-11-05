@@ -64,7 +64,7 @@ internal static class ProcessIntegrity
         {
             processes = Process.GetProcessesByName(processName);
         }
-        catch
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
         {
             return (false, ProcessIntegrityLevel.Unknown);
         }
@@ -82,7 +82,7 @@ internal static class ProcessIntegrity
                 {
                     level = GetForProcessId(process.Id);
                 }
-                catch
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
                 {
                     level = ProcessIntegrityLevel.Unknown;
                 }

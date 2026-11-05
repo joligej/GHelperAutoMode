@@ -230,6 +230,8 @@ internal sealed class AutomationEngine : IDisposable
         _logger.Info("Configuration reloaded.");
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "This WinForms timer is the automation error boundary. Record the failure and allow the next tick to run.")]
     private async void TimerOnTick(object? sender, EventArgs e)
     {
         if (_disposed || _tickRunning)
@@ -246,7 +248,7 @@ internal sealed class AutomationEngine : IDisposable
             // makes the old tick timestamp lag behind the actual process-time read.
             var gpuTelemetry = await _gpuMonitor.SampleAsync(
                 _configService.Current.Thresholds.GpuTelemetryGraceSeconds,
-                _configService.Current.Telemetry);
+                _configService.Current.Telemetry).ConfigureAwait(true);
             if (tickEpoch != _stateEpoch)
                 return;
 
@@ -1346,7 +1348,7 @@ internal sealed class AutomationEngine : IDisposable
                 NormalizeProcess(foregroundProcess),
                 ignoreCase: true);
         }
-        catch
+        catch (ArgumentException)
         {
             return false;
         }

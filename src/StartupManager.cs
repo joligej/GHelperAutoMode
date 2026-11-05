@@ -14,6 +14,7 @@ internal sealed record StartupStatus(
     bool TaskMatchesExecutable,
     bool TaskUsesHighestAvailable,
     bool TaskUsesInteractiveToken,
+    bool TaskHasRecoverySettings,
     bool LegacyRunEntryPresent,
     bool LegacyRunEntryOwned,
     bool LegacyTaskPresent,
@@ -76,6 +77,8 @@ internal static class StartupManager
 
     public static bool IsEnabled() => GetStatus().IsEnabled;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "Task Scheduler uses late-bound COM. Any query failure must be represented by the returned diagnostic status.")]
     public static StartupStatus GetStatus()
     {
         var executable = GetExecutablePath(requirePublishedExecutable: false);
@@ -89,6 +92,7 @@ internal static class StartupManager
         var taskMatchesExecutable = false;
         var taskUsesHighest = false;
         var taskUsesInteractive = false;
+        var taskHasRecoverySettings = false;
         var legacyTaskPresent = false;
         var legacyTaskOwned = false;
 
@@ -111,6 +115,10 @@ internal static class StartupManager
                     dynamic principal = definition.Principal;
                     taskUsesHighest = Convert.ToInt32(principal.RunLevel) == TaskRunLevelHighest;
                     taskUsesInteractive = Convert.ToInt32(principal.LogonType) == TaskLogonInteractiveToken;
+                    dynamic settings = definition.Settings;
+                    taskHasRecoverySettings = Convert.ToInt32(settings.RestartCount) == 3 &&
+                                              string.Equals(Convert.ToString(settings.RestartInterval), "PT1M", StringComparison.Ordinal);
+                    ReleaseComObject(settings);
                     taskMatchesExecutable = TaskHasExpectedAction(definition, executable);
                     ReleaseComObject(principal);
                     ReleaseComObject(definition);
@@ -154,6 +162,8 @@ internal static class StartupManager
             detailParts.Add("task is not configured for HighestAvailable");
         if (taskExists && !taskUsesInteractive)
             detailParts.Add("task does not use an interactive user token");
+        if (taskExists && !taskHasRecoverySettings)
+            detailParts.Add("task recovery settings need updating");
         if (legacyRun.Present)
             detailParts.Add(legacyRun.Owned ? "legacy Run entry remains" : "Run entry has unexpected content");
         if (legacyTaskPresent)
@@ -167,6 +177,7 @@ internal static class StartupManager
             taskMatchesExecutable,
             taskUsesHighest,
             taskUsesInteractive,
+            taskHasRecoverySettings,
             legacyRun.Present,
             legacyRun.Owned,
             legacyTaskPresent,
@@ -186,12 +197,14 @@ internal static class StartupManager
         }
 
         var status = GetStatus();
-        if (enabled && !status.IsEnabled)
+        if (enabled && (!status.IsEnabled || !status.TaskHasRecoverySettings))
             throw new InvalidOperationException($"The startup task could not be verified. {status.Detail}");
         if (!enabled && (status.TaskExists || status.LegacyRunEntryOwned || status.LegacyTaskOwned))
             throw new InvalidOperationException($"Owned startup entries remain after disabling startup. {status.Detail}");
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "This command-line boundary returns a failure exit code to the elevated caller for any management error.")]
     public static bool TryHandleManagementCommand(string[] args, out int exitCode)
     {
         exitCode = 0;
@@ -211,7 +224,7 @@ internal static class StartupManager
             var enabled = string.Equals(args[1], "enable", StringComparison.OrdinalIgnoreCase);
             ApplyStartupState(enabled);
             var status = GetStatus();
-            if ((enabled && !status.IsEnabled) ||
+            if ((enabled && (!status.IsEnabled || !status.TaskHasRecoverySettings)) ||
                 (!enabled && (status.TaskExists || status.LegacyRunEntryOwned || status.LegacyTaskOwned)))
             {
                 exitCode = 3;
@@ -225,6 +238,8 @@ internal static class StartupManager
         return true;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "Optional startup maintenance reports its COM failure without preventing the tray from starting.")]
     public static void MigrateLegacyStartupIfNeeded()
     {
         LastMaintenanceWarning = null;
@@ -237,7 +252,7 @@ internal static class StartupManager
                 return;
             }
 
-            if (status.IsEnabled && (status.LegacyTaskOwned || status.LegacyRunEntryOwned))
+            if (status.IsEnabled && (!status.TaskHasRecoverySettings || status.LegacyTaskOwned))
             {
                 ApplyStartupState(enabled: true);
                 return;
@@ -253,6 +268,8 @@ internal static class StartupManager
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "The relaunch boundary returns all COM or shell failures as a diagnostic to the entry point.")]
     public static bool TryRelaunchToMatchGHelper(string[] args, out string? error)
     {
         error = null;
@@ -268,6 +285,30 @@ internal static class StartupManager
 
         try
         {
+            var status = GetStatus();
+            if (status.IsEnabled)
+            {
+                // Reuse the approved elevated task for a manual, lower-integrity launch.
+                var service = CreateTaskService();
+                object? folder = null;
+                object? task = null;
+                try
+                {
+                    ((dynamic)service).Connect();
+                    folder = ((dynamic)service).GetFolder("\\");
+                    task = ((dynamic)folder).GetTask(status.TaskName);
+                    var running = ((dynamic)task).Run(null);
+                    ReleaseComObject(running);
+                    return true;
+                }
+                finally
+                {
+                    ReleaseComObject(task);
+                    ReleaseComObject(folder);
+                    ReleaseComObject(service);
+                }
+            }
+
             var startInfo = new ProcessStartInfo(executable)
             {
                 UseShellExecute = true,
@@ -340,6 +381,8 @@ internal static class StartupManager
                 ((dynamic)settings).StopIfGoingOnBatteries = false;
                 ((dynamic)settings).ExecutionTimeLimit = "PT0S";
                 ((dynamic)settings).MultipleInstances = TaskInstancesIgnoreNew;
+                ((dynamic)settings).RestartInterval = "PT1M";
+                ((dynamic)settings).RestartCount = 3;
 
                 triggers = taskDefinition.Triggers;
                 logonTrigger = ((dynamic)triggers).Create(TaskTriggerLogon);
@@ -530,7 +573,7 @@ internal static class StartupManager
                 ? (false, false, null)
                 : (true, IsOwnedStartupCommand(value), value);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return (false, false, null);
         }
@@ -563,7 +606,7 @@ internal static class StartupManager
         }
         else
         {
-            var separator = trimmed.IndexOf(' ');
+            var separator = trimmed.IndexOf(' ', StringComparison.Ordinal);
             executable = separator < 0 ? trimmed : trimmed[..separator];
         }
 
@@ -589,7 +632,7 @@ internal static class StartupManager
                 Path.GetFullPath(right),
                 StringComparison.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
         {
             return false;
         }

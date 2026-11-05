@@ -50,7 +50,7 @@ internal sealed class AsusCpuTemperatureMonitor : IDisposable
 
             throw new InvalidOperationException($"ASUS CPU temperature endpoint returned invalid value {value}.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
         {
             var failedAt = MonotonicClock.Now;
             _lastError = ex.Message;
@@ -141,7 +141,7 @@ internal sealed class AsusCpuTemperatureMonitor : IDisposable
 
     private void DropHandle()
     {
-        try { _handle?.Dispose(); } catch { /* best effort */ }
+        _handle?.Dispose();
         _handle = null;
     }
 

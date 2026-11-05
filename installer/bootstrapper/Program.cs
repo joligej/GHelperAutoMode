@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 namespace GHelperAutoMode.Setup;
 
 internal static partial class Program

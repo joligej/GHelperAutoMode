@@ -164,9 +164,7 @@ internal sealed class ConfigService
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public string BaseDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GHelperAutoMode");
+    public string BaseDirectory { get; }
 
     public string ConfigPath => Path.Combine(BaseDirectory, "config.json");
     public string LogDirectory => Path.Combine(BaseDirectory, "logs");
@@ -174,8 +172,11 @@ internal sealed class ConfigService
     public AutoModeConfig Current { get; private set; } = new();
     public string? LastLoadWarning { get; private set; }
 
-    public ConfigService()
+    public ConfigService(string? baseDirectory = null)
     {
+        BaseDirectory = baseDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GHelperAutoMode");
         Directory.CreateDirectory(BaseDirectory);
         Directory.CreateDirectory(LogDirectory);
         Load();
@@ -196,7 +197,8 @@ internal sealed class ConfigService
         try
         {
             var json = File.ReadAllText(ConfigPath);
-            Current = JsonSerializer.Deserialize<AutoModeConfig>(json, _jsonOptions) ?? new AutoModeConfig();
+            Current = JsonSerializer.Deserialize<AutoModeConfig>(json, _jsonOptions)
+                ?? throw new JsonException("The configuration must contain a JSON object.");
             var migrated = Migrate(Current);
             Normalize(Current);
 
@@ -209,13 +211,13 @@ internal sealed class ConfigService
 
             return Current;
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
             var backup = Path.Combine(
                 BaseDirectory,
                 $"config.invalid.{TimestampForFile()}.json");
 
-            try { File.Copy(ConfigPath, backup, overwrite: true); } catch { /* best effort */ }
+            File.Copy(ConfigPath, backup, overwrite: false);
 
             LastLoadWarning = $"config.json could not be read, so defaults were restored. Backup: {backup}. Error: {ex.Message}";
             Current = new AutoModeConfig();
@@ -267,7 +269,7 @@ internal sealed class ConfigService
                 if (File.Exists(tempPath))
                     File.Delete(tempPath);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Best effort only; the original save exception remains authoritative.
             }
@@ -322,15 +324,8 @@ internal sealed class ConfigService
 
     private void BackupPreMigrationConfig(string json)
     {
-        try
-        {
-            var backup = Path.Combine(BaseDirectory, $"config.pre-v{CurrentSchemaVersion}.{TimestampForFile()}.json");
-            File.WriteAllText(backup, json);
-        }
-        catch
-        {
-            // Migration itself must not fail merely because a backup could not be written.
-        }
+        var backup = Path.Combine(BaseDirectory, $"config.pre-v{CurrentSchemaVersion}.{TimestampForFile()}.json");
+        File.WriteAllText(backup, json);
     }
 
     private static void Normalize(AutoModeConfig config)
@@ -492,7 +487,7 @@ internal sealed class ConfigService
     }
 
     private static string TimestampForFile() =>
-        DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        DateTime.Now.ToString("yyyyMMdd-HHmmss-fffffff", CultureInfo.InvariantCulture);
 
     private static double ClampPercent(double value) => Math.Clamp(value, 0, 100);
 }

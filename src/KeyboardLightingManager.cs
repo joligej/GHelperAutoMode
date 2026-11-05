@@ -115,6 +115,8 @@ internal sealed class KeyboardLightingManager : IDisposable
         _ = ApplyNowAsync("config reload");
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "This timer and UI boundary reports an ownership failure and restores the polling state for the next attempt.")]
     public async Task<KeyboardLightingApplyResult> ApplyNowAsync(
         string reason,
         bool forceGHelperReload = false,
@@ -138,7 +140,7 @@ internal sealed class KeyboardLightingManager : IDisposable
 
         try
         {
-            var result = await ReconcileAsync(forceGHelperReload, forceOwnershipRefresh);
+            var result = await ReconcileAsync(forceGHelperReload, forceOwnershipRefresh).ConfigureAwait(true);
             _lastResult = result.Message;
             _lastApplyFailed = !result.Success;
 
@@ -213,7 +215,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         if (_configService.Current.KeyboardLighting.Mode == KeyboardLightingMode.Unmanaged)
             return;
 
-        await ApplyNowAsync("regular check");
+        await ApplyNowAsync("regular check").ConfigureAwait(true);
     }
 
     public void QueueOwnershipReassertion(string reason)
@@ -231,7 +233,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         {
             await Task.Delay(
                 TimeSpan.FromMilliseconds(_configService.Current.KeyboardLighting.SessionRecoveryDelayMilliseconds),
-                _lifetimeCancellation.Token);
+                _lifetimeCancellation.Token).ConfigureAwait(true);
             if (_disposed || generation != Volatile.Read(ref _sessionReassertGeneration))
                 return;
 
@@ -240,7 +242,7 @@ internal sealed class KeyboardLightingManager : IDisposable
             await ApplyNowAsync(
                 reason,
                 forceGHelperReload: true,
-                forceOwnershipRefresh: true);
+                forceOwnershipRefresh: true).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -292,7 +294,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 skipAura,
                 auraMode,
                 auraColor,
-                releaseGHelperLighting);
+                releaseGHelperLighting).ConfigureAwait(true);
             if (!gHelperResult.Success)
                 return gHelperResult;
 
@@ -321,7 +323,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 skipAura,
                 auraMode,
                 auraColor,
-                forceGHelperReload);
+                forceGHelperReload).ConfigureAwait(true);
             if (!gHelperResult.Success)
             {
                 return new KeyboardLightingApplyResult(
@@ -364,14 +366,14 @@ internal sealed class KeyboardLightingManager : IDisposable
                 $"G-Helper config was not found: {_gHelper.ConfigPath}");
         }
 
-        var current = await ReadGHelperConfigAsync();
+        var current = await ReadGHelperConfigAsync().ConfigureAwait(true);
         var configNeedsChange = ApplyDesiredGHelperValues(current, skipAura, auraMode, auraColor);
         var wasRunning = IsGHelperRunning(out var executablePath);
 
         if (!configNeedsChange && !(forceReload && wasRunning))
             return new KeyboardLightingApplyResult(true, false, string.Empty);
 
-        if (wasRunning && !await StopGHelperAsync())
+        if (wasRunning && !await StopGHelperAsync().ConfigureAwait(true))
         {
             return new KeyboardLightingApplyResult(
                 false,
@@ -383,7 +385,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         try
         {
             // Re-read only after G-Helper has exited so a final G-Helper save cannot race us.
-            current = await ReadGHelperConfigAsync();
+            current = await ReadGHelperConfigAsync().ConfigureAwait(true);
             wroteConfig = ApplyDesiredGHelperValues(current, skipAura, auraMode, auraColor);
             if (wroteConfig)
                 WriteGHelperConfigAtomically(current);
@@ -391,7 +393,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         catch
         {
             if (wasRunning)
-                await StartGHelperAsync(executablePath);
+                await StartGHelperAsync(executablePath).ConfigureAwait(true);
             throw;
         }
 
@@ -403,7 +405,7 @@ internal sealed class KeyboardLightingManager : IDisposable
             return new KeyboardLightingApplyResult(true, wroteConfig, detail);
         }
 
-        var restarted = await StartGHelperAsync(executablePath);
+        var restarted = await StartGHelperAsync(executablePath).ConfigureAwait(true);
         if (!restarted)
         {
             return new KeyboardLightingApplyResult(
@@ -440,20 +442,21 @@ internal sealed class KeyboardLightingManager : IDisposable
         {
             try
             {
-                await using var stream = new FileStream(
+                var stream = new FileStream(
                     _gHelper.ConfigPath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete,
                     bufferSize: 4096,
                     options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var streamLifetime = stream.ConfigureAwait(true);
                 var node = await JsonNode.ParseAsync(
                     stream,
                     documentOptions: new JsonDocumentOptions
                     {
                         AllowTrailingCommas = true,
                         CommentHandling = JsonCommentHandling.Skip
-                    });
+                    }).ConfigureAwait(true);
                 return node as JsonObject
                     ?? throw new JsonException("G-Helper config root is not a JSON object.");
             }
@@ -461,7 +464,7 @@ internal sealed class KeyboardLightingManager : IDisposable
             {
                 lastError = ex;
                 if (attempt + 1 < settings.GHelperConfigReadAttempts)
-                    await Task.Delay(settings.GHelperConfigReadRetryMilliseconds);
+                    await Task.Delay(settings.GHelperConfigReadRetryMilliseconds).ConfigureAwait(true);
             }
         }
 
@@ -489,7 +492,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 if (File.Exists(tempPath))
                     File.Delete(tempPath);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Preserve the original write exception; a stale temp file is harmless.
             }
@@ -537,7 +540,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 ReadInt(root, "aura_color2"),
                 ReadInt(root, "aura_speed"));
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return new GHelperAuraSignature(null, null, null, null, null);
         }
@@ -649,7 +652,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 enabledDevices,
                 windowsOwnedDevices);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return new DynamicLightingSnapshot(
                 null, null, null, null, null, "unavailable", 0, 0, 0);
@@ -691,7 +694,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 return true;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             // Continue with documented DWM and compatibility fallbacks.
         }
@@ -716,7 +719,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 return true;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             // Continue with the documented API fallback.
         }
@@ -747,7 +750,8 @@ internal sealed class KeyboardLightingManager : IDisposable
                     continue;
 
                 try { executablePath = process.MainModule?.FileName; }
-                catch { /* An elevated G-Helper may hide its module path. */ }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+                { /* An elevated G-Helper may hide its module path. */ }
             }
             return processes.Length > 0;
         }
@@ -783,7 +787,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         {
             if (!IsGHelperRunning(out _))
                 return true;
-            await Task.Delay(settings.GHelperProcessPollMilliseconds);
+            await Task.Delay(settings.GHelperProcessPollMilliseconds).ConfigureAwait(true);
         }
 
         return !IsGHelperRunning(out _);
@@ -813,12 +817,12 @@ internal sealed class KeyboardLightingManager : IDisposable
                     task.StartInfo.ArgumentList.Add($@"\GHelper_{sid}");
                     if (task.Start())
                     {
-                        await task.WaitForExitAsync();
-                        if (task.ExitCode == 0 && await WaitForGHelperStartAsync())
+                        await task.WaitForExitAsync().ConfigureAwait(true);
+                        if (task.ExitCode == 0 && await WaitForGHelperStartAsync().ConfigureAwait(true))
                             return true;
                     }
                 }
-                catch
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
                 {
                     // Retry briefly: Task Scheduler can still be retiring the old instance.
                 }
@@ -826,7 +830,7 @@ internal sealed class KeyboardLightingManager : IDisposable
                 if (IsGHelperRunning(out _))
                     return true;
                 if (attempt + 1 < settings.GHelperTaskStartAttempts)
-                    await Task.Delay(settings.GHelperTaskRetryMilliseconds);
+                    await Task.Delay(settings.GHelperTaskRetryMilliseconds).ConfigureAwait(true);
             }
         }
 
@@ -841,11 +845,13 @@ internal sealed class KeyboardLightingManager : IDisposable
             Process.Start(new ProcessStartInfo
             {
                 FileName = fallbackExecutablePath,
-                UseShellExecute = true
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
             });
-            return await WaitForGHelperStartAsync();
+            return await WaitForGHelperStartAsync().ConfigureAwait(true);
         }
-        catch
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return false;
         }
@@ -859,7 +865,7 @@ internal sealed class KeyboardLightingManager : IDisposable
         {
             if (IsGHelperRunning(out _))
                 return true;
-            await Task.Delay(settings.GHelperProcessPollMilliseconds);
+            await Task.Delay(settings.GHelperProcessPollMilliseconds).ConfigureAwait(true);
         }
         return IsGHelperRunning(out _);
     }

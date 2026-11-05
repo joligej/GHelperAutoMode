@@ -1,0 +1,18 @@
+root = true
+
+[*.{cs,csproj,wixproj,wxs,ps1,md,yml,json,sha256}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+[src/{SettingsForm,TrayApplicationContext}.cs]
+# The application has one English interface. Translation resources are added when another language is supported.
+dotnet_diagnostic.CA1303.severity = none
+
+[tests/**/*.cs]
+# Regression checks and their failure messages use the same English language as the application.
+dotnet_diagnostic.CA1303.severity = none

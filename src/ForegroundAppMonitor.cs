@@ -57,7 +57,7 @@ internal sealed class ForegroundAppMonitor
             _previousSampleAt = now;
             return new ForegroundActivity(processName, process.Id, coreEquivalent);
         }
-        catch
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
         {
             Reset();
             return new ForegroundActivity(string.Empty, null, null);

@@ -1,12 +1,14 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace GHelperAutoMode;
 
 internal sealed class NvidiaGpuMonitor : IDisposable
 {
-    private NvmlApi? _nvml;
+    private NvmlWorkerClient? _nvml;
+    private bool _nvmlWorkerFailed;
     private readonly string? _nvidiaSmiPath;
     private long? _lastNvmlAttemptAt;
     private GpuTelemetry? _lastGood;
@@ -22,8 +24,6 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
     public NvidiaGpuMonitor()
     {
-        _nvml = NvmlApi.TryCreate();
-        _lastNvmlAttemptAt = MonotonicClock.Now;
         _nvidiaSmiPath = LocateNvidiaSmi();
     }
 
@@ -36,10 +36,12 @@ internal sealed class NvidiaGpuMonitor : IDisposable
         var attemptNow = MonotonicClock.Now;
         TryRecoverNvml(attemptNow, settings);
 
-        var sample = SampleNvml(attemptNow, settings);
+        var sample = await SampleNvmlAsync(attemptNow, settings).ConfigureAwait(true);
+        if (_disposed || generation != _resetGeneration)
+            return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "discarded", "GPU sampling was reset.");
         if (sample is null || !sample.UtilizationPercent.HasValue)
         {
-            var fallback = await SampleNvidiaSmiAsync(generation, settings);
+            var fallback = await SampleNvidiaSmiAsync(generation, settings).ConfigureAwait(true);
             if (fallback is not null && fallback.UtilizationPercent.HasValue)
                 sample = fallback;
             else if (sample is null)
@@ -91,7 +93,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
     private void TryRecoverNvml(long now, TelemetryConfig settings)
     {
-        if (_nvml is not null)
+        if (_nvml is not null || _nvmlWorkerFailed)
             return;
 
         if (_lastNvmlAttemptAt.HasValue
@@ -99,17 +101,20 @@ internal sealed class NvidiaGpuMonitor : IDisposable
             return;
 
         _lastNvmlAttemptAt = now;
-        _nvml = NvmlApi.TryCreate();
+        _nvml = new NvmlWorkerClient();
     }
 
-    private GpuTelemetry? SampleNvml(long now, TelemetryConfig settings)
+    private async Task<GpuTelemetry?> SampleNvmlAsync(long now, TelemetryConfig settings)
     {
         if (_nvml is null)
             return null;
 
+        var worker = _nvml;
         try
         {
-            var sample = _nvml.Sample();
+            var sample = await worker.SampleAsync(settings.NvidiaSmiTimeoutSeconds).ConfigureAwait(true);
+            if (_disposed || !ReferenceEquals(worker, _nvml))
+                return null;
             if (sample.UtilizationPercent.HasValue)
             {
                 _consecutiveNvmlFailures = 0;
@@ -119,12 +124,40 @@ internal sealed class NvidiaGpuMonitor : IDisposable
             RegisterNvmlFailure(now, settings);
             return sample;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or OperationCanceledException or JsonException or System.ComponentModel.Win32Exception)
         {
-            RegisterNvmlFailure(now, settings);
+            // An access violation in a native driver cannot be caught safely by .NET.
+            // Only the worker exits. Keep this session on the independent smi provider.
+            if (ReferenceEquals(worker, _nvml))
+            {
+                _nvmlWorkerFailed = true;
+                worker.Dispose();
+                _nvml = null;
+            }
             return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "NVML", ex.Message);
         }
     }
+
+    public static int RunNvmlWorker()
+    {
+        _ = SetErrorMode(0x0002 | 0x8000);
+        using var nvml = NvmlApi.TryCreate();
+        if (nvml is null)
+            return 2;
+
+        using var input = new StreamReader(Console.OpenStandardInput());
+        using var output = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
+        while (input.ReadLine() is { } command)
+        {
+            if (command != "sample")
+                return 2;
+            output.WriteLine(JsonSerializer.Serialize(nvml.Sample()));
+        }
+        return 0;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint SetErrorMode(uint mode);
 
     private void RegisterNvmlFailure(long now, TelemetryConfig settings)
     {
@@ -134,7 +167,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
         // Driver resets / resume can invalidate existing NVML handles. Drop the stale
         // instance after repeated failures and allow a clean reinitialization later.
-        try { _nvml.Dispose(); } catch { /* best effort */ }
+        _nvml.Dispose();
         _nvml = null;
         _lastNvmlAttemptAt = now;
         _consecutiveNvmlFailures = 0;
@@ -143,7 +176,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
     public void ResetAfterResume()
     {
         _resetGeneration++;
-        try { _nvml?.Dispose(); } catch { /* best effort */ }
+        _nvml?.Dispose();
         _nvml = null;
         _lastNvmlAttemptAt = null;
         _consecutiveNvmlFailures = 0;
@@ -200,18 +233,25 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
             try
             {
-                await process.WaitForExitAsync(timeout.Token);
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {
-                try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                try { await process.WaitForExitAsync(); } catch { /* best effort */ }
-                try { await Task.WhenAll(outputTask, errorTask); } catch { /* best effort */ }
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                    await Task.WhenAll(process.WaitForExitAsync(), outputTask, errorTask)
+                        .WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(true);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or TimeoutException)
+                {
+                    // A timed-out driver query must not leave the automation tick waiting indefinitely.
+                }
                 return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "nvidia-smi", "nvidia-smi timed out.");
             }
 
-            var output = await outputTask;
-            var error = await errorTask;
+            var output = await outputTask.ConfigureAwait(true);
+            var error = await errorTask.ConfigureAwait(true);
             if (process.ExitCode != 0)
                 return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "nvidia-smi", string.IsNullOrWhiteSpace(error) ? $"Exit code {process.ExitCode}." : error.Trim());
 
@@ -243,7 +283,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
             }
             return sample;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return new GpuTelemetry(null, null, TelemetryQuality.Unavailable, "nvidia-smi", ex.Message);
         }
@@ -322,6 +362,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
         {
             IntPtr library = IntPtr.Zero;
             NvmlShutdownDelegate? shutdown = null;
+            var initialized = false;
 
             try
             {
@@ -335,7 +376,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
                             break;
                         }
                     }
-                    catch
+                    catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException)
                     {
                         // Try next candidate.
                     }
@@ -353,6 +394,7 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
                 if (init() != NvmlSuccess)
                     throw new InvalidOperationException("nvmlInit_v2 failed.");
+                initialized = true;
 
                 uint count = 0;
                 if (getCount(ref count) != NvmlSuccess || count == 0)
@@ -371,12 +413,15 @@ internal sealed class NvidiaGpuMonitor : IDisposable
 
                 return new NvmlApi(library, shutdown, getUtilization, getTemperature, devices.ToArray());
             }
-            catch
+            catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException or InvalidOperationException or MarshalDirectiveException)
             {
-                try { shutdown?.Invoke(); } catch { /* best effort */ }
+                if (initialized)
+                {
+                    shutdown?.Invoke();
+                }
                 if (library != IntPtr.Zero)
                 {
-                    try { NativeLibrary.Free(library); } catch { /* best effort */ }
+                    NativeLibrary.Free(library);
                 }
                 return null;
             }
@@ -443,8 +488,14 @@ internal sealed class NvidiaGpuMonitor : IDisposable
                 return;
 
             _disposed = true;
-            try { _shutdown(); } catch { /* best effort */ }
-            try { NativeLibrary.Free(_library); } catch { /* best effort */ }
+            try
+            {
+                _shutdown();
+            }
+            finally
+            {
+                NativeLibrary.Free(_library);
+            }
         }
 
         [StructLayout(LayoutKind.Sequential)]

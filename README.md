@@ -27,7 +27,7 @@ The release builds include their .NET runtime. The .NET 10 SDK is only needed to
 
 ## Install
 
-Download the latest release from [GitHub Releases](https://github.com/joligej/GHelperAutoMode/releases/latest). For most people, `GHelperAutoMode-5.0.1-win-x64-setup.exe` is the right file.
+Download the latest release from [GitHub Releases](https://github.com/joligej/GHelperAutoMode/releases/latest). For most people, `GHelperAutoMode-5.0.3-win-x64-setup.exe` is the right file.
 
 - Open Setup normally to install for the current Windows account under `%LOCALAPPDATA%\Programs`.
 - Run the same Setup file as administrator to install for every account under `C:\Program Files`.
@@ -38,17 +38,17 @@ The raw MSI is included for managed deployments. It defaults to the current user
 
 ```powershell
 # Current user
-msiexec /i .\GHelperAutoMode-5.0.1-win-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1
+msiexec /i .\GHelperAutoMode-5.0.3-win-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1
 
 # All users; run this command from an elevated terminal
-msiexec /i .\GHelperAutoMode-5.0.1-win-x64.msi ALLUSERS=1
+msiexec /i .\GHelperAutoMode-5.0.3-win-x64.msi ALLUSERS=1
 ```
 
 The portable ZIP is still available. Extract it to a directory you intend to keep, then run `GHelperAutoMode.exe`.
 
 ### WinGet
 
-The WinGet package ID is `joligej.GHelperAutoMode`. The initial manifest is under review in [microsoft/winget-pkgs#429318](https://github.com/microsoft/winget-pkgs/pull/429318). The package will not appear in the default community source until Microsoft merges that pull request.
+The proposed WinGet package ID is `joligej.GHelperAutoMode`. The initial submission was closed after a request for privacy documentation. A public product policy is now included with the project. The commands below become available after a new manifest is accepted into the community source. [Original submission](https://github.com/microsoft/winget-pkgs/pull/429318) · [Privacy policy](PRIVACY.md)
 
 After it is merged, install for the current account from a normal terminal:
 
@@ -67,6 +67,10 @@ WinGet uses the release MSI and passes its documented dual-purpose scope propert
 ### Startup and uninstall
 
 The installer does not silently add a login task. Choose **Run at Windows login (Task Scheduler)** from the tray menu when you want it. The task is called `GHelperAutoMode_<your Windows SID>` and appears in Task Scheduler rather than Task Manager's Startup apps page. Windows may ask for approval when the task is created or removed; later logins do not need another prompt.
+
+The login task retries failed launches up to three times, one minute apart. A waiting parent process also restarts the tray after an abnormal exit, with the same retry limit and delay. Exiting through the tray menu stops both processes. AutoMode updates existing enabled tasks when their recovery settings are missing. Manual launches reuse the elevated task when G-Helper is already running with administrator rights.
+
+NVIDIA telemetry runs in a persistent child process of the same executable, with `--nvml-worker` in its command line. If a native driver call crashes or exceeds the provider timeout, the tray stays open and uses `nvidia-smi` for the rest of that session. Task Manager normally shows three processes for AutoMode, comprising the waiting parent, the tray (`--tray`), and the telemetry worker. The most recent abnormal tray exit is recorded in `%LOCALAPPDATA%\GHelperAutoMode\logs\last-recovery.txt`, even when routine logging is disabled.
 
 Uninstall from **Installed apps** or with `winget uninstall joligej.GHelperAutoMode`. Windows Installer closes the tray process even when AutoMode has elevated itself to match G-Helper, removes AutoMode's task for the current account, then removes the program and Start menu shortcut. Your config and logs are left in place for a later reinstall.
 
@@ -178,11 +182,17 @@ Or rebuild everything in one pass:
 Installer output:
 
 ```text
-dist\installer\GHelperAutoMode-5.0.1-win-x64.msi
-dist\installer\GHelperAutoMode-5.0.1-win-x64-setup.exe
+dist\installer\GHelperAutoMode-5.0.3-win-x64.msi
+dist\installer\GHelperAutoMode-5.0.3-win-x64-setup.exe
 ```
 
 The application has one project, so its C# files live directly under `src`. Installer code remains separate under `installer`. The build requires the .NET 10 SDK. WiX Toolset 6.0.2 is pinned by the installer project and restored automatically. Strict builds treat warnings as errors and run the Windows Installer ICE checks. Release files are unsigned because this project does not have a code-signing certificate; compare downloads with `SHA256SUMS.txt` before running them.
+
+Normal application builds enable all .NET analyzers and treat warnings as errors. Run the hardware-independent regression suite with the command below. Add `-- --gpu` to include real NVIDIA samples and a worker-termination test on a supported machine.
+
+```powershell
+dotnet run --project tests/GHelperAutoMode.Tests -c Release
+```
 
 The implementation notes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the checks recorded for the current release are in [docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md).
 

@@ -376,7 +376,7 @@ internal sealed class GHelperController
         {
             return Process.GetProcessesByName("GHelper").ToList();
         }
-        catch
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
         {
             return [];
         }
@@ -419,7 +419,7 @@ internal sealed class GHelperController
 
             RecordTransport("keybd_event", $"Emitted {DescribeHotkey(modifiers, functionKey)} using G-Helper-style keybd_event fallback.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)
         {
             BestEffortReleaseLegacyKeys(modifiers, functionKey);
             RecordTransport("keybd_event", $"Legacy keyboard fallback failed: {ex.Message}");
@@ -503,7 +503,7 @@ internal sealed class GHelperController
             for (var i = modifiers.Count - 1; i >= 0; i--)
                 keybd_event((byte)modifiers[i], 0, LegacyFlags(modifiers[i]) | KeyeventfKeyup, UIntPtr.Zero);
         }
-        catch
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)
         {
             // Best effort only.
         }
@@ -522,7 +522,7 @@ internal sealed class GHelperController
             if (released == 0)
                 return;
         }
-        catch
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)
         {
             // Cleanup is strictly best effort after a failed/partial SendInput call.
         }
@@ -571,12 +571,12 @@ internal sealed class GHelperController
         uint mask = 0;
         foreach (var token in tokens)
         {
-            mask |= token.ToLowerInvariant() switch
+            mask |= token.ToUpperInvariant() switch
             {
-                "ctrl" or "control" => ModControl,
-                "shift" => ModShift,
-                "alt" or "menu" => ModAlt,
-                "win" or "windows" => ModWin,
+                "CTRL" or "CONTROL" => ModControl,
+                "SHIFT" => ModShift,
+                "ALT" or "MENU" => ModAlt,
+                "WIN" or "WINDOWS" => ModWin,
                 _ => 0u
             };
         }
@@ -593,12 +593,12 @@ internal sealed class GHelperController
 
         foreach (var token in tokens)
         {
-            ushort? key = token.ToLowerInvariant() switch
+            ushort? key = token.ToUpperInvariant() switch
             {
-                "ctrl" or "control" => VkControl,
-                "shift" => VkShift,
-                "alt" or "menu" => VkMenu,
-                "win" or "windows" => VkLWin,
+                "CTRL" or "CONTROL" => VkControl,
+                "SHIFT" => VkShift,
+                "ALT" or "MENU" => VkMenu,
+                "WIN" or "WINDOWS" => VkLWin,
                 _ => null
             };
 

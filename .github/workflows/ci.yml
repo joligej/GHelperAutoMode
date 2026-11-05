@@ -32,6 +32,14 @@ jobs:
         shell: powershell
         run: dotnet format GHelperAutoMode.csproj --verify-no-changes --no-restore
 
+      - name: Run regression checks
+        shell: powershell
+        run: dotnet run --project tests/GHelperAutoMode.Tests -c Release
+
+      - name: Verify regression formatting
+        shell: powershell
+        run: dotnet format tests/GHelperAutoMode.Tests --verify-no-changes --no-restore
+
       - name: Build installers
         shell: powershell
         run: .\scripts\build-installer.ps1 -SkipAppBuild -Strict

@@ -12,8 +12,16 @@ internal static class Program
     public static string Version => typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
     [STAThread]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Do not catch general exception types",
+        Justification = "The application entry point reports unexpected failures and returns a nonzero exit code to its supervisor.")]
     private static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--nvml-worker")
+        {
+            Environment.ExitCode = NvidiaGpuMonitor.RunNvmlWorker();
+            return;
+        }
+
         if (TryHandleUninstallPreparation(args, out var uninstallExitCode))
         {
             Environment.ExitCode = uninstallExitCode;
@@ -46,6 +54,7 @@ internal static class Program
 
         if (!string.IsNullOrWhiteSpace(elevationError))
         {
+            Environment.ExitCode = 1;
             if (!launchedForStartup)
             {
                 MessageBox.Show(
@@ -54,6 +63,12 @@ internal static class Program
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
+            return;
+        }
+
+        if (!args.Any(arg => string.Equals(arg, "--tray", StringComparison.OrdinalIgnoreCase)))
+        {
+            Environment.ExitCode = StartupSupervisor.Run(args, TimeSpan.FromMinutes(1));
             return;
         }
 
@@ -101,6 +116,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            Environment.ExitCode = 1;
             MessageBox.Show(
                 $"GHelperAutoMode hit an unexpected error and needs to close.\n\n{ex.GetType().Name}: {ex.Message}",
                 "GHelperAutoMode",
@@ -123,7 +139,7 @@ internal static class Program
         {
             StartupManager.SetEnabled(false);
         }
-        catch
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
             // MSI owns the installed files, so a stale startup registration must not make
             // the whole uninstall fail. The command still asks any running instance to exit.
@@ -168,7 +184,7 @@ internal static class Program
                 if (!instance.WaitForExit(2000))
                     exitCode = 1;
             }
-            catch
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
             {
                 exitCode = 1;
             }
@@ -212,7 +228,7 @@ internal static class Program
                     continue;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
             {
                 // A lower-integrity helper may not be allowed to inspect the target path.
             }
@@ -232,7 +248,7 @@ internal static class Program
                 if (!instance.HasExited)
                     return true;
             }
-            catch
+            catch (InvalidOperationException)
             {
                 // A process that disappeared between checks is no longer a blocker.
             }

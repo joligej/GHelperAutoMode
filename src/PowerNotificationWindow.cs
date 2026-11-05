@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Win32.SafeHandles;
 
 namespace GHelperAutoMode;
 
@@ -24,11 +25,12 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
     private static readonly Guid GuidSessionDisplayStatus =
         new("2B84C20E-AD23-4DDF-93DB-05FFBD7EFCA5");
 
-    private IntPtr _displayRegistrationHandle;
+    private readonly PowerNotificationHandle _displayRegistrationHandle;
+    private bool _disposed;
     private bool _sessionNotificationRegistered;
     private long? _lastResumeNotificationAt;
 
-    public bool DisplayNotificationRegistered => _displayRegistrationHandle != IntPtr.Zero;
+    public bool DisplayNotificationRegistered => !_displayRegistrationHandle.IsInvalid && !_displayRegistrationHandle.IsClosed;
     public int DisplayRegistrationError { get; private set; }
     public bool SessionNotificationRegistered => _sessionNotificationRegistered;
     public int SessionRegistrationError { get; private set; }
@@ -50,13 +52,14 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
             _ = ChangeWindowMessageFilterEx(Handle, ExitMessage, MsgfltAllow, IntPtr.Zero);
 
         var guid = GuidSessionDisplayStatus;
-        _displayRegistrationHandle = RegisterPowerSettingNotification(
+        var registration = RegisterPowerSettingNotification(
             Handle,
             ref guid,
             DeviceNotifyWindowHandle);
 
-        if (_displayRegistrationHandle == IntPtr.Zero)
+        if (registration == IntPtr.Zero)
             DisplayRegistrationError = Marshal.GetLastWin32Error();
+        _displayRegistrationHandle = new PowerNotificationHandle(registration);
 
         _sessionNotificationRegistered = WTSRegisterSessionNotification(
             Handle,
@@ -141,7 +144,7 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
             if (state != DisplayState.Unknown)
                 DisplayStateChanged?.Invoke(state);
         }
-        catch
+        catch (ArgumentException)
         {
             // Ignore malformed/unexpected power messages; automation will remain conservative.
         }
@@ -149,20 +152,26 @@ internal sealed class PowerNotificationWindow : NativeWindow, IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+            return;
+        _disposed = true;
         if (_sessionNotificationRegistered)
         {
             _ = WTSUnRegisterSessionNotification(Handle);
             _sessionNotificationRegistered = false;
         }
 
-        if (_displayRegistrationHandle != IntPtr.Zero)
-        {
-            _ = UnregisterPowerSettingNotification(_displayRegistrationHandle);
-            _displayRegistrationHandle = IntPtr.Zero;
-        }
+        _displayRegistrationHandle.Dispose();
 
         DestroyHandle();
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class PowerNotificationHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public PowerNotificationHandle(IntPtr handle) : base(ownsHandle: true) => SetHandle(handle);
+
+        protected override bool ReleaseHandle() => UnregisterPowerSettingNotification(handle);
     }
 
     [DllImport("user32.dll", SetLastError = true)]
